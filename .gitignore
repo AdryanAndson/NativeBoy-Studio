@@ -1,0 +1,6 @@
+build/
+dist/
+deps/
+*.o
+*.part
+tests/RESULTADOS.md

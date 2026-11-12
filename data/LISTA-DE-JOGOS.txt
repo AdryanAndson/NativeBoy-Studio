@@ -1,0 +1,19 @@
+Lista de jogos de Game Boy e Game Boy Color (assets/jogos_gb.txt)
+
+O NativeBoy Studio usa esta lista para reconhecer uma ROM pelo checksum (CRC32) e mostrar o nome
+oficial do jogo, o gênero, o ano, a editora, a desenvolvedora, o número de jogadores e a série, além
+de um tipo de jogo (plataforma, RPG, quebra-cabeça...) usado como ponto de partida para os ajustes de tela.
+
+Origem: libretro-database (https://github.com/libretro/libretro-database), arquivos
+metadat/no-intro, metadat/genre, metadat/developer, metadat/publisher, metadat/releaseyear,
+metadat/maxusers e metadat/franchise de "Nintendo - Game Boy" e "Nintendo - Game Boy Color".
+Licença: Creative Commons Atribuição-CompartilhaIgual 4.0 Internacional (CC BY-SA 4.0),
+texto completo em CC-BY-SA-4.0.txt.
+
+Alterações: foram mantidos o CRC32, o nome, o gênero (traduzido para o português e convertido também
+nos tipos do NativeBoy), o ano, a editora, a desenvolvedora, o número de jogadores e a série. Quando
+uma versão do jogo (região ou revisão) não tinha um desses dados, ele foi copiado de outra versão com
+o mesmo nome. Marcas "???" da fonte foram retiradas. A lista derivada (jogos_gb.txt) também fica sob
+CC BY-SA 4.0. Gerada por tools/dados/gerar_jogos_gb.py (código-fonte do NativeBoy Studio).
+
+A lista não contém nenhuma ROM nem parte de jogos: só nomes, dados de catálogo e checksums.

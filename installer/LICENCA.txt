@@ -1,0 +1,26 @@
+NativeBoy Studio 1.0.0
+Licença de uso (MIT)
+
+Copyright (c) 2026 Adryan Andson da Silva
+
+É concedida permissão, gratuitamente, a qualquer pessoa que obtenha uma cópia
+deste software e dos arquivos de documentação associados, para usar, copiar,
+modificar, mesclar, publicar, distribuir, sublicenciar e/ou vender cópias do
+software, sujeito às seguintes condições:
+
+O aviso de copyright acima e este aviso de permissão devem ser incluídos em
+todas as cópias ou partes substanciais do software.
+
+O SOFTWARE É FORNECIDO "NO ESTADO EM QUE SE ENCONTRA", SEM GARANTIA DE QUALQUER
+TIPO, EXPRESSA OU IMPLÍCITA.
+
+AVISO SOBRE JOGOS
+O NativeBoy Studio não inclui nenhum jogo. Use-o somente com ROMs de jogos que
+você possui legalmente ou com software livre/homebrew. Os executáveis gerados
+contêm o código e os dados do jogo original; distribuí-los exige os direitos
+sobre esse jogo.
+
+COMPONENTES DE TERCEIROS (licenças na pasta "licencas")
+- SDL2 (zlib)            - Dear ImGui (MIT)          - stb (MIT / domínio público)
+- w64devkit / GCC / binutils / mingw-w64 (GPL com exceção de runtime, ZPL, domínio público)
+- RGBDS (MIT)            - Fonte DejaVu Sans (licença livre Bitstream Vera)

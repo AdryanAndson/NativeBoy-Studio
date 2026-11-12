@@ -1,0 +1,27 @@
+NativeBoy Studio 1.16.0
+======================
+
+Abra o NativeBoy Studio pelo atalho do Menu Iniciar ou da Área de Trabalho.
+Arraste uma ROM .gb ou .gbc para a janela (ou clique em uma das 4 opções):
+
+  JOGAR ROM                 roda o jogo original por EMULAÇÃO (interpretador)
+  DESCOMPILAR ROM           gera um projeto editável: assembly RGBDS, funções,
+                            folhas de gráficos e músicas em VGM
+  CONVERTER PARA PC NATIVO  traduz o código SM83 para C++, compila um .exe
+                            Windows x64 e verifica o resultado contra o original
+  MODIFICAR JOGO            editor de tiles, paletas, patches/mods, pacotes HD,
+                            cheats e ganchos C++
+
+Onde ficam os arquivos
+  Documentos\NativeBoy Studio\Projetos\    um projeto por jogo
+  Documentos\NativeBoy Studio\Meus Jogos\  jogos exportados (abrem com 2 cliques)
+
+O relatório de compatibilidade diz exatamente o estado da conversão:
+  NATIVO COMPLETO (verificado)  todo o código executado na verificação rodou
+                                como código x64, com resultado idêntico ao original
+  NATIVO PARCIAL                parte do código ainda usou o interpretador de
+                                compatibilidade; use "Corrigir automaticamente"
+  FALHA                         divergência detectada; não use o executável
+
+Linha de comando (opcional, para usuários avançados):
+  NativeBoyStudio.exe --convert jogo.gb [--frames 3600] [--verify 3600] [--export]

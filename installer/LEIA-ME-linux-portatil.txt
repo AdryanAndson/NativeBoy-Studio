@@ -1,0 +1,19 @@
+NativeBoy Studio 1.16.0 - versão portátil para Linux x64 (Ubuntu/Lubuntu 24.04 ou mais novo)
+=========================================================================================
+
+1. Descompacte (botão direito > Extrair aqui, ou: tar xzf NativeBoyStudio-1.16.0-linux-x64.tar.gz)
+2. Abra a pasta e rode  ./instalar.sh  (opcional: cria o atalho no menu e oferece instalar
+   o g++ e o zenity se faltarem). Ou dê dois cliques em NativeBoyStudio.
+3. Arraste uma ROM .gb / .gbc para a janela.
+
+O que é necessário no sistema
+  - Para abrir o Studio, jogar e descompilar: nada (a SDL2 vem junto, na pasta lib/).
+  - Para CONVERTER jogos: o compilador g++   ->  sudo apt install g++
+  - Recomendado: zenity (janelas de abrir arquivo)  ->  sudo apt install zenity
+    (sem ele, você pode arrastar os arquivos para a janela)
+
+Onde ficam os arquivos: ~/Documentos/NativeBoy Studio/  (Projetos e Meus Jogos)
+Os jogos exportados levam a SDL2 junto e abrem em qualquer Ubuntu 24.04+.
+
+Linha de comando: ./NativeBoyStudio --convert jogo.gb [--frames 3600] [--verify 3600] [--export]
+Desinstalar: ./desinstalar.sh e apague a pasta.

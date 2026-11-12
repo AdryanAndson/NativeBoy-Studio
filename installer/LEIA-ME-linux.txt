@@ -1,0 +1,26 @@
+NativeBoy Studio 1.16.0 para Linux (Ubuntu / Lubuntu / Xubuntu / Kubuntu 24.04 ou mais novo)
+==========================================================================================
+
+Instalação
+  Dê dois cliques no arquivo nativeboy-studio_1.16.0_amd64.deb (ou, no terminal:
+  sudo apt install ./nativeboy-studio_1.16.0_amd64.deb). O apt instala sozinho o
+  compilador g++, a biblioteca SDL2 e o zenity (janelas de arquivo).
+
+Abrir
+  Menu de aplicativos > Jogos (ou Desenvolvimento) > NativeBoy Studio,
+  ou no terminal: nativeboy-studio
+
+Uso: arraste uma ROM .gb / .gbc para a janela e escolha
+  JOGAR ROM                 emulação (interpretador)
+  DESCOMPILAR ROM           projeto editável (assembly RGBDS, gráficos, música VGM)
+  CONVERTER PARA PC NATIVO  gera um executável Linux x64 nativo e verifica contra o original
+  MODIFICAR JOGO            tiles, cores, mods, pacotes HD, cheats, ganchos C++
+
+Onde ficam os arquivos
+  ~/Documentos/NativeBoy Studio/Projetos/    um projeto por jogo
+  ~/Documentos/NativeBoy Studio/Meus Jogos/  jogos exportados
+Cada jogo exportado aparece também no menu de aplicativos, na seção Jogos.
+O jogo exportado leva junto a biblioteca SDL2 (libSDL2-2.0.so.0) e não precisa da ROM.
+
+Linha de comando (opcional)
+  nativeboy-studio --convert jogo.gb [--frames 3600] [--verify 3600] [--export]

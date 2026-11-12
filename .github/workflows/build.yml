@@ -1,0 +1,47 @@
+name: build
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pacotes do sistema
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ mingw-w64 nsis imagemagick p7zip-full libsdl2-dev dpkg-dev fonts-dejavu-core zenity xvfb xdotool
+      - name: Dependências fixas
+        run: DEPS=$PWD/deps scripts/fetch_deps.sh
+      - name: Testes verificáveis
+        run: tests/run_all.sh deps/testroms deps/rgbds
+      - name: Build Windows (Studio + instalador)
+        run: DEPS=$PWD/deps ./build_win.sh
+      - name: Build Linux (.deb, .tar.gz, AppImage)
+        run: DEPS=$PWD/deps ./build_linux.sh
+      - name: Teste automático da interface (Linux)
+        run: xvfb-run -a -s "-screen 0 1600x1000x24" tests/gui_test.sh dist/linux/pkg/opt/nativeboy-studio/NativeBoyStudio deps/testroms/dmg-acid2.gb
+      - name: Hashes
+        run: cd dist && sha256sum NativeBoyStudio_Setup.exe linux/*.deb linux/*.tar.gz linux/*.AppImage > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nativeboy-studio
+          path: |
+            dist/NativeBoyStudio_Setup.exe
+            dist/linux/*.deb
+            dist/linux/*.tar.gz
+            dist/linux/*.AppImage
+            dist/SHA256SUMS.txt
+            tests/RESULTADOS.md
+      - name: Publicar release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/NativeBoyStudio_Setup.exe
+            dist/linux/*.deb
+            dist/linux/*.tar.gz
+            dist/linux/*.AppImage
+            dist/SHA256SUMS.txt
