@@ -368,6 +368,7 @@ struct Machine {
         bool active = false;
     };
     void ahead_keep_apu(RunAhead& ra);
+    void ahead_drop_sound();             // (in machine.cpp: the sound unit is not complete in this header)
     // runs n frames ahead (per_frame is called after each one, e.g. for cheats); false if nothing was done
     template <class F> bool ahead_begin(RunAhead& ra, int n, NativeResolver* native, F per_frame);
     void ahead_end(RunAhead& ra);
@@ -426,7 +427,7 @@ template <class F> bool Machine::ahead_begin(RunAhead& ra, int n, NativeResolver
     widescreen = false;                   // the extra frames do not touch the wide picture nor the scenery memory
     for (int i = 0; i < n; i++) { run_frame(native); per_frame(); }
     widescreen = wide;
-    apu->out.clear();                     // their sound is not played
+    ahead_drop_sound();                   // their sound is not played
     if (wide) ahead_paste(sx0, sy0);
     ra.active = true;
     return true;

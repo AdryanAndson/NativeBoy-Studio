@@ -133,6 +133,7 @@ struct App {
     Settings prefs;
     Toolchain tc;
     bool export_windows = false;   // CLI --windows
+    bool export_android = false;   // CLI --android (Android project for the APK)
     Toolchain tcw;          // Linux: MinGW-w64 toolchain for Windows .exe (detected on demand)
     Screen screen = SC_HOME;
     std::unique_ptr<Project> proj;
@@ -1795,6 +1796,11 @@ static int cli_convert(App& app, const std::string& rom, int dframes, int vframe
     for (auto& i : r.items) say("  - " + i.text);
     if (do_export) { std::string out; if (!p.step_export(app.games_root(), app.tc, log, err, out)) { say("ERRO: " + err); return 6; } say("EXPORTADO: " + out);
         if (getenv("NB_ATALHOS")) { std::string e; say(make_game_shortcuts(out, true, true, e) ? "ATALHOS: ok" : "ATALHOS: " + e); } }
+    if (do_export && app.export_android) {
+        std::string out;
+        if (!p.make_android_project(app.games_root(), app.tc, log, err, out)) { say("ERRO: " + err); return 8; }
+        say("ANDROID: " + out);
+    }
     if (do_export && app.export_windows) {
         Toolchain w; std::string out;
         if (!w.detect_cross_windows(app.tc, app.user_dir)) { say("ERRO: " + w.problem); return 7; }
@@ -1846,6 +1852,7 @@ int main(int argc_, char** argv_) {
                 if (!strcmp(argv[k], "--verify") && k + 1 < argc) vf = atoi(argv[k + 1]);
                 if (!strcmp(argv[k], "--export")) ex = true;
                 if (!strcmp(argv[k], "--windows")) { ex = true; app.export_windows = true; }
+                if (!strcmp(argv[k], "--android")) { ex = true; app.export_android = true; }
                 if (!strcmp(argv[k], "--projects") && k + 1 < argc) app.prefs.set("pasta_projetos", argv[k + 1]);
                 if (!strcmp(argv[k], "--games") && k + 1 < argc) app.prefs.set("pasta_jogos", argv[k + 1]);
             }

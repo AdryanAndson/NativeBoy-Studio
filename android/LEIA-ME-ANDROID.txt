@@ -1,0 +1,24 @@
+Projeto Android de um jogo convertido pelo NativeBoy Studio.
+
+O jeito mais fácil: no Studio, use "Gerar APK no GitHub". Ele envia esta pasta para um repositório
+privado na sua conta do GitHub, o GitHub compila o APK (cerca de 10 minutos) e o Studio baixa o APK
+pronto para a pasta Meus Jogos/Android.
+
+Fazendo à mão:
+  1. Crie um repositório PRIVADO no GitHub (o jogo contém os dados da ROM).
+  2. Envie esta pasta inteira para ele (com a pasta .github), por exemplo com o GitHub Desktop.
+  3. Na aba Actions, espere a compilação "apk" terminar.
+  4. O APK aparece em Releases. Copie para o celular e instale
+     (o Android pede para permitir "instalar apps desconhecidos").
+
+Com o Android Studio (ou Android SDK + NDK + Gradle) no PC também dá: baixe as fontes do SDL 2.30.9
+para a pasta SDL2, copie SDL2/android-project/app/src/main/java/org/libsdl para app/src/main/java/org/
+e rode "gradle assembleRelease". Sem o arquivo assinatura.jks, crie um com o keytool (veja o arquivo
+.github/workflows/apk.yml).
+
+No celular:
+  - Em pé: o jogo aparece num aparelho desenhado, com botões que você toca.
+  - Deitado: tela cheia com botões transparentes na tela (dá para apertar vários de uma vez).
+  - "<<" segurado volta no tempo, ">>" acelera, "≡" (ou o botão Voltar do celular) abre o menu.
+  - Controles Bluetooth e USB funcionam.
+  - O progresso é salvo sozinho quando você sai do app.

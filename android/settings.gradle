@@ -1,0 +1,9 @@
+// Projeto Android de um jogo convertido pelo NativeBoy Studio
+pluginManagement {
+    repositories { google(); mavenCentral(); gradlePluginPortal() }
+}
+dependencyResolutionManagement {
+    repositories { google(); mavenCentral() }
+}
+rootProject.name = "NativeBoyJogo"
+include ':app'

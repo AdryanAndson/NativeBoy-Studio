@@ -48,7 +48,11 @@ static std::string U(const std::wstring& w) {
 #endif
 
 std::string exe_dir() {
-#ifdef _WIN32
+#if defined(__ANDROID__)
+    // the app's private folder: the game files are copied there from the APK on the first start
+    const char* p = SDL_AndroidGetInternalStoragePath();
+    return p ? p : ".";
+#elif defined(_WIN32)
     wchar_t buf[MAX_PATH * 2];
     DWORD n = GetModuleFileNameW(nullptr, buf, MAX_PATH * 2);
     return S(fs::path(std::wstring(buf, n)).parent_path());
@@ -68,6 +72,8 @@ std::string user_data_dir(const std::string& app) {
     if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &p))) { base = U(p); CoTaskMemFree(p); }
     else base = exe_dir();
     std::string d = join(base, app);
+#elif defined(__ANDROID__)
+    std::string d = join(exe_dir(), app);
 #else
     const char* h = getenv("HOME");
     std::string d = join(join(h ? h : ".", ".local/share"), app);

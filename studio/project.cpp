@@ -1119,6 +1119,111 @@ void ar_member(std::string& out, const std::string& name, const std::string& d) 
 }
 } // namespace
 
+// Android: a Gradle project with the game's generated code, the runtime sources and the game files.
+// It is compiled on GitHub (see studio/github_apk.cpp) or with the Android SDK + NDK.
+//   <games>/Android/<name>/
+//     jogo/src/         generated C++ (banks, tables), rom.bin + rom_data.S, user hooks
+//     jogo/apk_assets/  assets/ and config/ of the exported game + arquivos.txt (copied to the phone on first start)
+//     nativeboy/        runtime sources (core, common, runtime, imgui, stb)
+//     app/, *.gradle    the Android app (template from sdk/android), icons from the game icon
+//     .github/workflows/apk.yml  the build on GitHub
+bool Project::make_android_project(const std::string& games_root, const Toolchain& tc, BuildLog& log, std::string& err, std::string& out_dir) {
+    const std::string game_dir = ini.get("pasta_exportada", "");
+    if (game_dir.empty() || !plat::file_exists(plat::join(game_dir, "config/jogo.ini"))) { err = "Exporte o jogo para o PC primeiro (o Android usa os mesmos arquivos)."; return false; }
+    const std::string tpl = plat::join(tc.sdk, "android");
+    if (!plat::file_exists(plat::join(tpl, "app/build.gradle"))) { err = "O modelo do projeto Android não está no SDK do Studio (" + tpl + ")."; return false; }
+    if (!plat::file_exists(path("src/rom_data.S"))) { err = "Converta o jogo antes (falta o código gerado em src/)."; return false; }
+    out_dir = plat::join(plat::join(games_root, "Android"), name);
+    // a fresh copy each time, keeping only the signature (so updates install over the old app)
+    std::string keep_sig;
+    plat::read_text(plat::join(out_dir, "assinatura.jks"), keep_sig);
+    for (const char* sub : {"jogo", "nativeboy", "app"}) plat::remove_tree(plat::join(out_dir, sub));
+    if (!plat::make_dirs(out_dir)) { err = "Não foi possível criar " + out_dir; return false; }
+    if (!plat::copy_tree(tpl, out_dir)) { err = "Não foi possível copiar o modelo do projeto Android."; return false; }
+    plat::make_dirs(plat::join(out_dir, ".github/workflows"));
+    plat::copy_file(plat::join(tpl, "github/workflows/apk.yml"), plat::join(out_dir, ".github/workflows/apk.yml"));
+    plat::remove_tree(plat::join(out_dir, "github"));
+    if (!keep_sig.empty()) plat::write_file(plat::join(out_dir, "assinatura.jks"), keep_sig.data(), keep_sig.size());
+    plat::write_text(plat::join(out_dir, ".gitignore"), "build/\n.gradle/\napp/build/\napp/.cxx/\nSDL2/\napp/src/main/java/org/libsdl/\nlocal.properties\n*.apk\n");
+    // runtime sources
+    const std::string nb = plat::join(out_dir, "nativeboy");
+    for (const char* sub : {"core", "common", "imgui", "stb"}) plat::copy_tree(plat::join(tc.sdk, sub), plat::join(nb, sub));
+    plat::make_dirs(plat::join(nb, "runtime"));
+    for (const char* f : {"main.cpp", "selftest.cpp"}) plat::copy_file(plat::join(tc.sdk, std::string("runtime/") + f), plat::join(nb, std::string("runtime/") + f));
+    // the game's generated code
+    const std::string js = plat::join(out_dir, "jogo/src");
+    plat::make_dirs(js);
+    int nsrc = 0;
+    for (auto& f : plat::list_dir(path("src"), false)) {
+        const bool code = f.size() > 4 && (f.substr(f.size() - 4) == ".cpp" || f.substr(f.size() - 2) == ".h" || f.substr(f.size() - 2) == ".S");
+        if (code || f == "rom.bin") { plat::copy_file(path("src/" + f), plat::join(js, f)); nsrc++; }
+    }
+    if (plat::file_exists(path("mods/hooks.cpp"))) plat::copy_file(path("mods/hooks.cpp"), plat::join(js, "hooks_usuario.cpp"));
+    // the game files, as in the PC version, with settings for phones
+    const std::string aa = plat::join(out_dir, "jogo/apk_assets");
+    std::string list = "# " + plat::now_stamp() + "\n";
+    for (auto& rel : game_files(game_dir)) {
+        if (rel.compare(0, 7, "assets/") != 0 && rel.compare(0, 7, "config/") != 0) continue;
+        if (rel == "config/estatisticas_nativas.txt" || rel == "config/instalado.ini") continue;
+        const std::string dst = plat::join(aa, rel);
+        plat::make_dirs(plat::parent(dst));
+        if (!plat::copy_file(plat::join(game_dir, rel), dst)) continue;
+        list += rel + "\n";
+    }
+    {
+        Settings s; s.load(plat::join(aa, "config/settings.ini")); s.path = plat::join(aa, "config/settings.ini");
+        // standing up: the drawn console (the creator's choice of style); lying down: full screen with touch buttons
+        const std::string vc = ini.get("padrao_visual_console", "desligado");
+        s.set("visual_console", "auto");
+        if (vc == "gb" || vc == "gbc") s.set("estilo_console_auto", vc);
+        s.kv.erase("janela"); s.kv.erase("fullscreen");
+        s.save();
+        if (list.find("config/settings.ini\n") == std::string::npos) list += "config/settings.ini\n";
+    }
+    plat::write_text(plat::join(aa, "arquivos.txt"), list);
+    // app name, identifier and version
+    std::string id = "org.nativeboy.jogo.";
+    for (char c : ascii_id(exe_name)) id += isalnum((unsigned char)c) ? (char)tolower((unsigned char)c) : '_';
+    if (!isalpha((unsigned char)id[19])) id.insert(19, "j");
+    const long vcode = (long)(time(nullptr) / 60 - 29000000L);       // minutes: grows with every export
+    std::string nm; for (char c : name) nm += c == '\n' || c == '\r' ? ' ' : c;
+    std::string props = "# Preenchido pelo NativeBoy Studio\nid=" + id + "\nversionCode=" + std::to_string(vcode) +
+                        "\nversionName=1.0." + std::to_string(vcode) + "\narquivo=" + ascii_id(exe_name) + "\n";
+    {   // Java properties files are ISO-8859-1: other characters go as \uXXXX
+        std::string esc;
+        for (size_t i = 0; i < nm.size();) {
+            unsigned char c = (unsigned char)nm[i];
+            uint32_t cp = c; int len = 1;
+            if (c >= 0xF0 && i + 3 < nm.size()) { cp = ((c & 7) << 18) | ((nm[i + 1] & 63) << 12) | ((nm[i + 2] & 63) << 6) | (nm[i + 3] & 63); len = 4; }
+            else if (c >= 0xE0 && i + 2 < nm.size()) { cp = ((c & 15) << 12) | ((nm[i + 1] & 63) << 6) | (nm[i + 2] & 63); len = 3; }
+            else if (c >= 0xC0 && i + 1 < nm.size()) { cp = ((c & 31) << 6) | (nm[i + 1] & 63); len = 2; }
+            if (cp < 0x80 && cp != '\\') esc += (char)cp;
+            else { char b[16]; snprintf(b, sizeof b, "\\u%04X", (unsigned)(cp > 0xFFFF ? '?' : cp)); esc += b; }
+            i += len;
+        }
+        props += "nome=" + esc + "\n";
+    }
+    plat::write_text(plat::join(out_dir, "jogo-android.properties"), props);
+    // launcher icons (the game icon; or the Studio's)
+    {
+        std::vector<uint32_t> px; int w = 0, h = 0;
+        if (!load_png(path("build/icone.png"), px, w, h)) load_png(plat::join(plat::exe_dir(), "assets/icon.png"), px, w, h);
+        if (w > 0 && h > 0) {
+            const std::pair<const char*, int> dens[] = {{"mdpi", 48}, {"hdpi", 72}, {"xhdpi", 96}, {"xxhdpi", 144}, {"xxxhdpi", 192}};
+            for (auto& d : dens) {
+                const std::string dir2 = plat::join(out_dir, std::string("app/src/main/res/mipmap-") + d.first);
+                plat::make_dirs(dir2);
+                auto ic = box_resize(px, w, h, d.second, d.second);
+                save_png(plat::join(dir2, "ic_launcher.png"), ic.data(), d.second, d.second);
+            }
+        }
+    }
+    ini.set("pasta_android", out_dir);
+    save();
+    if (log.line) log.line("Projeto Android criado em " + out_dir + " (" + std::to_string(nsrc) + " arquivos do jogo).");
+    return true;
+}
+
 bool Project::make_deb(const std::string& game_dir, const std::string& games_root, BuildLog& log, std::string& err, std::string& out_file) {
     Settings gi; gi.load(plat::join(game_dir, "config/jogo.ini"));
     std::string name = gi.get("nome", exe_name), stamp = gi.get("exportado", plat::now_stamp());

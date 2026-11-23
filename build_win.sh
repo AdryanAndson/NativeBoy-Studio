@@ -53,7 +53,7 @@ RC
 # 3. compile Studio
 SRCS="studio/main.cpp studio/project.cpp studio/toolchain.cpp studio/translate.cpp studio/studio_extras.cpp studio/perfis.cpp recomp/analysis.cpp recomp/codegen.cpp recomp/disasm.cpp
 core/machine.cpp core/apu.cpp core/sgb.cpp core/interp.cpp core/optable.cpp common/platform.cpp common/settings.cpp common/video.cpp
-common/ui_common.cpp common/player.cpp common/player_extras.cpp common/console.cpp common/music.cpp common/recorder.cpp common/link.cpp $D/imgui/imgui.cpp $D/imgui/imgui_draw.cpp $D/imgui/imgui_tables.cpp
+common/ui_common.cpp common/player.cpp common/player_extras.cpp common/console.cpp common/touch.cpp common/music.cpp common/recorder.cpp common/link.cpp $D/imgui/imgui.cpp $D/imgui/imgui_draw.cpp $D/imgui/imgui_tables.cpp
 $D/imgui/imgui_widgets.cpp $D/imgui/backends/imgui_impl_sdl2.cpp $D/imgui/backends/imgui_impl_sdlrenderer2.cpp"
 pids=""
 for f in $SRCS; do
@@ -81,6 +81,7 @@ mkdir -p "$STAGE/sdk/core" "$STAGE/sdk/common" "$STAGE/sdk/runtime" "$STAGE/sdk/
          "$STAGE/sdk/SDL2/include" "$STAGE/sdk/SDL2/lib" "$STAGE/sdk/SDL2/bin"
 cp core/gb.h core/cpu_ops.h core/apu.h core/sgb.h core/sgb.cpp core/autoplay.h core/machine.cpp core/apu.cpp core/interp.cpp core/interp_gen.inc "$STAGE/sdk/core/"
 cp common/*.h common/*.cpp "$STAGE/sdk/common/"
+rm -rf "$STAGE/sdk/android" && cp -r android "$STAGE/sdk/android"
 cp runtime/*.cpp "$STAGE/sdk/runtime/"
 cp $D/imgui/imgui.h $D/imgui/imgui_internal.h $D/imgui/imconfig.h $D/imgui/imstb_*.h $D/imgui/imgui.cpp $D/imgui/imgui_draw.cpp \
    $D/imgui/imgui_tables.cpp $D/imgui/imgui_widgets.cpp $D/imgui/LICENSE.txt "$STAGE/sdk/imgui/"

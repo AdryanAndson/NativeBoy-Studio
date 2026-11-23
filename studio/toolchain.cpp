@@ -57,7 +57,7 @@ std::string Toolchain::exe_suffix() const { return win_target() ? ".exe" : ""; }
 std::vector<std::string> Toolchain::runtime_sources() const {
     std::vector<std::string> v;
     for (auto f : {"core/machine.cpp", "core/apu.cpp", "core/sgb.cpp", "core/interp.cpp", "common/platform.cpp", "common/settings.cpp",
-                   "common/video.cpp", "common/ui_common.cpp", "common/player.cpp", "common/player_extras.cpp", "common/console.cpp", "common/music.cpp", "common/recorder.cpp", "common/link.cpp", "runtime/main.cpp", "runtime/selftest.cpp",
+                   "common/video.cpp", "common/ui_common.cpp", "common/player.cpp", "common/player_extras.cpp", "common/console.cpp", "common/touch.cpp", "common/music.cpp", "common/recorder.cpp", "common/link.cpp", "runtime/main.cpp", "runtime/selftest.cpp",
                    "imgui/imgui.cpp", "imgui/imgui_draw.cpp", "imgui/imgui_tables.cpp", "imgui/imgui_widgets.cpp",
                    "imgui/backends/imgui_impl_sdl2.cpp", "imgui/backends/imgui_impl_sdlrenderer2.cpp"})
         v.push_back(plat::join(sdk, f));

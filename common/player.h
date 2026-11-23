@@ -3,6 +3,10 @@
 // battery saves, save states, screenshots, mods (IPS data patches, cheats,
 // HD packs) and an in-game menu. Used by exported games and by the Studio.
 #pragma once
+// phones and tablets (Android): touch controls, files inside the app, no windows to move
+#if defined(__ANDROID__) && !defined(NB_MOBILE)
+#define NB_MOBILE 1
+#endif
 #include "../core/gb.h"
 #include "settings.h"
 #include "video.h"
@@ -10,6 +14,7 @@
 #include "music.h"
 #include "recorder.h"
 #include <map>
+struct ImDrawList;
 #include <memory>
 #include <SDL.h>
 #include <string>
@@ -201,6 +206,31 @@ struct GamePlayer {
     void console_labels();
     ConsoleHit console_hit(float px, float py) const;   // renderer coordinates
     uint8_t mouse_buttons = 0;               // Game Boy buttons held with the mouse / a touch on the drawn console
+    bool console_gbc() const;                // Color style (also when "automatic" picks the console)
+    // ---- touch controls (phones and tablets; also usable on a PC touch screen)
+    // Every finger is followed on its own (several buttons at once, sliding over the d-pad).
+    // Lying down: d-pad on the left, A/B on the right, Start/Select below, menu and rewind buttons on top.
+    // Standing up (portrait), "automatic" shows the drawn console instead, which also reacts to fingers.
+    struct TouchPad {
+        bool on = false;
+        SDL_FPoint dpad{}; float dpad_r = 0;
+        SDL_FPoint a{}, b{}; float ab_r = 0;
+        SDL_FRect start{}, select{}, menu{}, rewind{}, fast{};
+    } tpad;
+    std::map<int64_t, uint16_t> fingers;     // finger -> buttons it holds (bit 8 = rewind, bit 9 = fast)
+    uint8_t touch_bits = 0;                  // Game Boy buttons held by fingers
+    bool rewind_touch_hold = false, fast_touch_hold = false;
+    bool touch_seen = false;                 // a finger touched the screen (automatic mode shows the controls)
+    bool portrait = false;                   // the screen is taller than wide
+    Uint32 touch_hidden_at = 0;              // keyboard / controller used: the controls fade away
+    SDL_Haptic* haptic = nullptr;
+    bool touch_controls_on() const;
+    SDL_Rect touch_game_area(const SDL_Rect& area) const;   // where the picture goes when the controls need room
+    void touch_layout(const SDL_Rect& area);
+    uint16_t touch_hit(float x, float y, bool first) const;
+    void touch_event(const SDL_Event& e);
+    void draw_touch(ImDrawList* dl);
+    void suspend_save();                     // the app goes to the background (phone): save everything now
     bool want_minimize = false;
     // ---- power on / off animation
     int power_state = 0;                     // 1 turning on, 2 turning off, 3 off (window may close)

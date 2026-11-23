@@ -3,6 +3,7 @@
 #include "ui_common.h"
 #include "../core/apu.h"
 #include "imgui.h"
+#include "imgui_internal.h"
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
@@ -189,6 +190,16 @@ bool GamePlayer::start(const std::vector<u8>& rom, const std::string& bd, const 
         cfg.set("janela", "4");
         cfg.save();
     }
+#ifdef NB_MOBILE
+    // phones: the drawn console when standing up, bigger menus, run-ahead off (battery)
+    if (!cfg.kv.count("visual_console")) cfg.set("visual_console", "auto");
+    if (!cfg.kv.count("escala_interface")) cfg.seti("escala_interface", 170);
+    if (!cfg.kv.count("run_ahead")) cfg.seti("run_ahead", 0);
+    if (!haptic && SDL_InitSubSystem(SDL_INIT_HAPTIC) == 0 && SDL_NumHaptics() > 0) {
+        haptic = SDL_HapticOpen(0);
+        if (haptic && SDL_HapticRumbleInit(haptic) != 0) { SDL_HapticClose(haptic); haptic = nullptr; }
+    }
+#endif
     rom_original = rom;
     {   // the link cable tells the partner which game this is (CRC of the original ROM)
         uint32_t c = 0xFFFFFFFFu;
@@ -341,8 +352,16 @@ static int menu_step(int tab, int d) {
 
 void GamePlayer::handle_event(const SDL_Event& e) {
     ahead_off();                                        // keys and menus always act on the real game
-    if (con.on && running && ren && (e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP || e.type == SDL_MOUSEMOTION)) {
-        // the drawn buttons work with the mouse and with touch screens (touches arrive as mouse clicks)
+    touch_event(e);                                     // fingers: touch controls and the drawn console's buttons
+    // phone "back" button: opens / closes the menu
+    if (e.type == SDL_KEYDOWN && e.key.keysym.scancode == SDL_SCANCODE_AC_BACK && !e.key.repeat) {
+        if (start_screen && !menu_open) return;
+        menu_open = !menu_open; return;
+    }
+    const bool from_touch = (e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP) ? e.button.which == SDL_TOUCH_MOUSEID
+                          : e.type == SDL_MOUSEMOTION ? e.motion.which == SDL_TOUCH_MOUSEID : false;
+    if (con.on && running && ren && !from_touch && (e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP || e.type == SDL_MOUSEMOTION)) {
+        // the drawn buttons work with the mouse (fingers are followed one by one in touch_event)
         SDL_Window* w = SDL_GetWindowFromID(e.type == SDL_MOUSEMOTION ? e.motion.windowID : e.button.windowID);
         int ww = 1, wh = 1, ow = 1, oh = 1;
         if (w) SDL_GetWindowSize(w, &ww, &wh);
@@ -461,7 +480,9 @@ void GamePlayer::update() {
         if (SDL_GameControllerGetButton(p, SDL_CONTROLLER_BUTTON_BACK) && SDL_GameControllerGetButton(p, SDL_CONTROLLER_BUTTON_START)) { menu_open = true; }
     }
     if (menu_open) pad_state = axis_state = 0;
-    u8 b = kb_state | pad_state | axis_state | (con.on && !menu_open ? mouse_buttons : 0);
+    if (!menu_open && rewind_touch_hold) rewind_in = true;
+    if (!menu_open && fast_touch_hold) fast_pad = true;
+    u8 b = kb_state | pad_state | axis_state | (con.on && !menu_open ? mouse_buttons : 0) | (!menu_open ? touch_bits : 0);
     if ((b & BTN_LEFT) && (b & BTN_RIGHT)) b &= (u8)~(BTN_LEFT | BTN_RIGHT);
     if ((b & BTN_UP) && (b & BTN_DOWN)) b &= (u8)~(BTN_UP | BTN_DOWN);
     if ((b & ~m.buttons) && !menu_open) { m.iflag |= IRQ_JOYPAD; m.force_event(); }
@@ -783,7 +804,9 @@ void GamePlayer::render(SDL_Renderer* r, const SDL_Rect& win) {
     ren = r;
     SDL_Rect area = win;
     console_layout(win);
+    touch_layout(win);
     if (con.on) { console_draw(r, win); area = con.screen; }
+    else area = touch_game_area(win);
     if (power_state == 1 || power_state == 2) {
         SDL_Rect scr = area;
         if (!con.on && power_state == 1) {               // without the console: a screen-shaped box in the middle
@@ -1028,9 +1051,11 @@ void GamePlayer::render_game(SDL_Renderer* r, const SDL_Rect& area) {
 
 void GamePlayer::draw_overlay(const SDL_Rect& area) {
     console_layout(area);
+    touch_layout(area);
     console_labels();
     power_labels(power_screen);
     ImDrawList* dl = ImGui::GetForegroundDrawList();
+    draw_touch(ImGui::GetBackgroundDrawList());
     // achievement toasts (top right, stacked)
     Uint32 now_t = SDL_GetTicks();
     toasts.erase(std::remove_if(toasts.begin(), toasts.end(), [&](const Toast& t) { return now_t > t.until; }), toasts.end());
@@ -1112,6 +1137,21 @@ static bool combo_setting(Settings& cfg, const char* label, const char* key, con
     return ch;
 }
 
+// phones: dragging a finger scrolls the menu (ImGui only scrolls with the wheel or the scrollbar).
+// A drag that starts on a button cancels the button; a slider moved sideways keeps working.
+static void touch_scroll(bool horizontal = false) {
+    ImGuiIO& io = ImGui::GetIO();
+    if (io.MouseSource != ImGuiMouseSource_TouchScreen || !ImGui::IsMouseDown(0)) return;
+    if (!ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem)) return;
+    const ImVec2 d = ImGui::GetMouseDragDelta(0, 0.f);
+    const float along = horizontal ? std::fabs(d.x) : std::fabs(d.y), across = horizontal ? std::fabs(d.y) : std::fabs(d.x);
+    if (along < 12.f || along < across) return;
+    ImGuiContext& g = *GImGui;
+    if (g.ActiveId) ImGui::ClearActiveID();
+    if (horizontal) ImGui::SetScrollX(ImGui::GetScrollX() - io.MouseDelta.x);
+    else ImGui::SetScrollY(ImGui::GetScrollY() - io.MouseDelta.y);
+}
+
 // a button that goes on the same line as the previous one only if it fits (menus in small windows)
 static bool flow_button(const char* label) {
     const ImGuiStyle& st = ImGui::GetStyle();
@@ -1151,18 +1191,21 @@ void GamePlayer::draw_menu(const SDL_Rect& area) {
     const float pw = std::min((float)area.w - 24, 1060.f * uis);
     ImGui::SetCursorPos(ImVec2((area.w - pw) / 2, 14));
     ImGui::BeginGroup();
-    ImGui::PushFont(nullptr, 30.f * uis);
-    ImGui::TextUnformatted(game_name.c_str());
-    ImGui::PopFont();
-    ImGui::SameLine();
+    const bool narrow = area.w < area.h || pw < 620.f * uis;     // a phone standing up, or a small window
     {
-        const char* back = "Voltar ao jogo";
-        float bwid = ImGui::CalcTextSize(back).x + 34;
+        const char* back = narrow ? "Voltar" : "Voltar ao jogo";
+        const float bwid = ImGui::CalcTextSize(back).x + 34;
+        ImGui::PushFont(nullptr, (narrow ? 22.f : 30.f) * uis);
+        std::string nm = game_name;
+        while (narrow && nm.size() > 4 && ImGui::CalcTextSize(nm.c_str()).x > pw - bwid - 20) nm = nm.substr(0, nm.size() - 4) + "...";
+        ImGui::TextUnformatted(nm.c_str());
+        ImGui::PopFont();
+        ImGui::SameLine();
         ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX() + 10, (area.w + pw) / 2 - bwid));
         if (ImGui::Button(back)) menu_open = false;
     }
-    if (emulation) ui::badge("MODO EMULAÇÃO (interpretador SM83)", IM_COL32(170, 110, 20, 255));
-    else ui::badge("EXECUTÁVEL NATIVO RECOMPILADO", IM_COL32(30, 130, 90, 255));
+    if (emulation) ui::badge(narrow ? "EMULAÇÃO" : "MODO EMULAÇÃO (interpretador SM83)", IM_COL32(170, 110, 20, 255));
+    else ui::badge(narrow ? "NATIVO" : "EXECUTÁVEL NATIVO RECOMPILADO", IM_COL32(30, 130, 90, 255));
     ImGui::SameLine();
     bool fid = fidelity();
     if (ImGui::Checkbox("Fidelidade ao original", &fid)) {
@@ -1170,8 +1213,31 @@ void GamePlayer::draw_menu(const SDL_Rect& area) {
     }
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Joga exatamente como no aparelho original: desliga widescreen, filtros, trapaças e todas as melhorias.");
     ImGui::Spacing();
-    // the list of sections
-    const float navw = std::min(220.f * uis, pw * 0.3f), ch = area.h - ImGui::GetCursorPosY() - 16;
+    // the list of sections: on the left, or (narrow screens: a phone standing up) a row on top
+    float navw = std::min(220.f * uis, pw * 0.3f), ch = area.h - ImGui::GetCursorPosY() - 16;
+    if (narrow) {
+        const float rowh = ImGui::GetTextLineHeight() + 18 + ImGui::GetStyle().ScrollbarSize;
+        ImGui::BeginChild("secoes", ImVec2(pw, rowh), 0, ImGuiWindowFlags_HorizontalScrollbar);
+        touch_scroll(true);
+        for (int k = 0; k < 10; k++) {
+            const int i = order[k];
+            const bool sel = menu_tab == i;
+            if (k) ImGui::SameLine(0, 6);
+            ImGui::PushID(i);
+            ImGui::PushStyleColor(ImGuiCol_Button, sel ? ImGui::GetStyle().Colors[ImGuiCol_ButtonActive] : ImVec4(0.18f, 0.16f, 0.32f, 1));
+            if (sel && (opening || want_tab >= 0)) { ImGui::SetKeyboardFocusHere(); ImGui::SetScrollHereX(0.5f); }
+            ImVec2 p0 = ImGui::GetCursorScreenPos();
+            const float bw = ImGui::CalcTextSize(sections[i]).x + 34;
+            if (ImGui::Button("##s", ImVec2(bw, ImGui::GetTextLineHeight() + 14))) menu_tab = i;
+            ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(p0.x + 12, p0.y + (ImGui::GetTextLineHeight() + 14) / 2), 5.f * uis, ui::accent(k));
+            ImGui::GetWindowDrawList()->AddText(ImVec2(p0.x + 24, p0.y + 7), ImGui::GetColorU32(ImGuiCol_Text), sections[i]);
+            ImGui::PopStyleColor();
+            ImGui::PopID();
+        }
+        ImGui::EndChild();
+        ch -= rowh + ImGui::GetStyle().ItemSpacing.y;
+        navw = 0;
+    } else {
     ImGui::BeginChild("secoes", ImVec2(navw, ch));
     for (int k = 0; k < 10; k++) {
         const int i = order[k];
@@ -1188,11 +1254,17 @@ void GamePlayer::draw_menu(const SDL_Rect& area) {
     }
     ImGui::Spacing();
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
+#ifdef NB_MOBILE
+    ImGui::TextWrapped("Voltar do celular: fecha o menu");
+#else
     ImGui::TextWrapped("Esc / B: voltar\nLB / RB ou PgUp / PgDn: seção");
+#endif
     ImGui::PopStyleColor();
     ImGui::EndChild();
     ImGui::SameLine(0, 14);
-    ImGui::BeginChild("conteudo", ImVec2(pw - navw - 14, ch), ImGuiChildFlags_Borders);
+    }
+    ImGui::BeginChild("conteudo", ImVec2(narrow ? pw : pw - navw - 14, ch), ImGuiChildFlags_Borders);
+    touch_scroll();
     ImGui::PushFont(nullptr, 22.f * uis);
     ImGui::TextUnformatted(sections[menu_tab]);
     ImGui::PopFont();
@@ -1233,17 +1305,27 @@ void GamePlayer::draw_menu(const SDL_Rect& area) {
         if (tab("Vídeo", 1)) {
             ImGui::SeparatorText("Visual do aparelho");
             {
-                static const char* vc_ids[] = {"desligado", "gb", "gbc"};
-                static const char* vc_names[] = {"Desligado (janela normal)", "Clássico (estilo Game Boy)", "Color (estilo Game Boy Color)"};
+                static const char* vc_ids[] = {"desligado", "gb", "gbc", "auto"};
+                static const char* vc_names[] = {"Desligado (janela normal)", "Clássico (estilo Game Boy)", "Color (estilo Game Boy Color)", "Automático: em pé vira o aparelho"};
                 std::string before = cfg.get("visual_console", "desligado");
-                combo_setting(cfg, "Janela com visual de console", "visual_console", vc_ids, vc_names, 3, "desligado");
+#ifdef NB_MOBILE
+                const int vc_n = 4;
+#else
+                const int vc_n = cfg.get("visual_console", "") == "auto" ? 4 : 3;
+#endif
+                combo_setting(cfg, "Janela com visual de console", "visual_console", vc_ids, vc_names, vc_n, "desligado");
+                if (cfg.get("visual_console", "") == "auto") {
+                    static const char* st_ids[] = {"gbc", "gb"};
+                    static const char* st_names[] = {"Color (estilo Game Boy Color)", "Clássico (estilo Game Boy)"};
+                    combo_setting(cfg, "Aparelho quando em pé", "estilo_console_auto", st_ids, st_names, 2, "gbc");
+                }
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("A janela vira o aparelho: o jogo na tela dele, botões que afundam quando você aperta\n(e que dá para clicar ou tocar), luz de ligado e janela sem bordas que você arrasta pelo corpo.");
                 if (cfg.get("visual_console", "desligado") != before) { apply_settings(); want_resize = true; frame_ready = true; }
                 if (console_on() && cfg.getb("widescreen", false)) ImGui::TextDisabled("O widescreen fica desligado enquanto a janela tem o visual de console.");
                 if (console_on()) {
                     static const char* cc_ids[] = {"cinza", "roxo_translucido", "roxo", "amarelo", "azul_petroleo", "vermelho", "verde", "preto"};
                     static const char* cc_names[] = {"Cinza clássico", "Roxo translúcido", "Roxo", "Amarelo", "Azul-petróleo", "Vermelho", "Verde", "Preto"};
-                    combo_setting(cfg, "Cor do aparelho", "console_cor", cc_ids, cc_names, 8, cfg.get("visual_console", "gb") == "gbc" ? "roxo_translucido" : "cinza");
+                    combo_setting(cfg, "Cor do aparelho", "console_cor", cc_ids, cc_names, 8, console_gbc() ? "roxo_translucido" : "cinza");
                     bool refl = cfg.getb("console_reflexo", true);
                     if (ImGui::Checkbox("Reflexo no vidro da tela", &refl)) { cfg.set("console_reflexo", refl ? "1" : "0"); cfg.save(); }
                 }
@@ -1485,6 +1567,21 @@ void GamePlayer::draw_menu(const SDL_Rect& area) {
             
         }
         if (tab("Controles", 3)) {
+            {   // touch screens (phones, tablets, PCs with a touch screen)
+                ImGui::SeparatorText("Controles de toque");
+                static const char* tq_ids[] = {"auto", "sempre", "nunca"};
+                static const char* tq_names[] = {"Automático (aparecem ao tocar na tela)", "Sempre visíveis", "Nunca"};
+                ImGui::SetNextItemWidth(std::min(330.f * uis, ImGui::GetContentRegionAvail().x * 0.55f));
+                combo_setting(cfg, "Botões na tela", "controles_toque", tq_ids, tq_names, 3, "auto");
+                int ts = cfg.geti("toque_tamanho", 100), to = cfg.geti("toque_opacidade", 55);
+                ImGui::SetNextItemWidth(std::min(330.f * uis, ImGui::GetContentRegionAvail().x * 0.55f));
+                if (ImGui::SliderInt("Tamanho dos botões", &ts, 60, 150, "%d%%")) cfg.seti("toque_tamanho", ts);
+                ImGui::SetNextItemWidth(std::min(330.f * uis, ImGui::GetContentRegionAvail().x * 0.55f));
+                if (ImGui::SliderInt("Transparência", &to, 15, 100, "%d%%")) cfg.seti("toque_opacidade", to);
+                bool vib = cfg.getb("vibrar_toque", true);
+                if (ImGui::Checkbox("Vibrar ao apertar", &vib)) { cfg.set("vibrar_toque", vib ? "1" : "0"); cfg.save(); }
+                ImGui::TextDisabled("Dá para apertar vários botões ao mesmo tempo e deslizar o dedo pelo direcional.\n\"<<\" segurado volta no tempo; \">>\" acelera; \"≡\" abre este menu.");
+            }
             {
                 static const char* ra_names[] = {"Desligado (como o aparelho)", "1 quadro (recomendado)", "2 quadros (mínimo atraso)"};
                 int ra = std::max(0, std::min(2, cfg.geti("run_ahead", 1)));

@@ -64,6 +64,7 @@ struct Project {
     // single-file version of an exported game folder: a small launcher with the folder packed inside
     // installers: Windows "Instalar <name>.exe" (own installer, per user, with uninstaller) and Linux .deb
     bool make_installer_windows(const std::string& game_dir, const std::string& games_root, const Toolchain& tc, BuildLog& log, std::string& err, std::string& out_file);
+    bool make_android_project(const std::string& games_root, const Toolchain& tc, BuildLog& log, std::string& err, std::string& out_dir);
     bool make_deb(const std::string& game_dir, const std::string& games_root, BuildLog& log, std::string& err, std::string& out_file);
     bool make_single_exe(const std::string& game_dir, const std::string& games_root, const Toolchain& tc, BuildLog& log, std::string& err, std::string& out_file);
 

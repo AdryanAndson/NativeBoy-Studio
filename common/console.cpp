@@ -93,14 +93,16 @@ Shell shell_colours(const std::string& id, int style) {
 
 bool GamePlayer::console_on() const {
     const std::string v = cfg.get("visual_console", "desligado");
+    if (v == "auto") return portrait;          // standing phone: the drawn console; lying down: full screen
     return v == "gb" || v == "gbc";
 }
 
 void GamePlayer::console_layout(const SDL_Rect& area) {
     ConsoleLayout& c = con;
+    portrait = area.h > area.w;
     c.on = console_on();
     if (!c.on) return;
-    c.style = cfg.get("visual_console", "gb") == "gbc" ? 1 : 0;
+    c.style = console_gbc() ? 1 : 0;
     const float W = 1000, H = c.style ? 1700.f : 1640.f;
     const float u = std::min(area.w * 0.97f / W, area.h * 0.97f / H);
     c.u = u;

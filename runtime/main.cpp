@@ -97,10 +97,57 @@ static void save_window(SDL_Window* w, GamePlayer& p) {
     }
 }
 
+#ifdef __ANDROID__
+// Android: the game's files (assets/, config/) travel inside the APK. On the first start, and after an
+// update of the app, they are copied to the app's private folder, where the game reads them like on a PC.
+// arquivos.txt (made by the Studio) lists them. The player's own settings are never overwritten.
+static bool apk_read(const std::string& path, std::string& out) {
+    SDL_RWops* rw = SDL_RWFromFile(path.c_str(), "rb");
+    if (!rw) return false;
+    out.clear();
+    char buf[16384]; size_t n;
+    while ((n = SDL_RWread(rw, buf, 1, sizeof buf)) > 0) out.append(buf, n);
+    SDL_RWclose(rw);
+    return true;
+}
+static void apk_unpack(const std::string& base) {
+    std::string list, have;
+    if (!apk_read("arquivos.txt", list)) return;
+    plat::read_text(plat::join(base, "arquivos.txt"), have);
+    if (have == list) return;
+    size_t p = 0;
+    while (p < list.size()) {
+        size_t e = list.find('\n', p);
+        std::string f = list.substr(p, e == std::string::npos ? std::string::npos : e - p);
+        p = e == std::string::npos ? list.size() : e + 1;
+        while (!f.empty() && (f.back() == '\r' || f.back() == ' ')) f.pop_back();
+        if (f.empty() || f[0] == '#') continue;
+        const std::string dst = plat::join(base, f);
+        if (f == "config/settings.ini" && plat::file_exists(dst)) continue;
+        std::string data;
+        if (!apk_read(f, data)) continue;
+        size_t sl = dst.rfind('/');
+        if (sl != std::string::npos) plat::make_dirs(dst.substr(0, sl));
+        plat::write_file(dst, data.data(), data.size());
+    }
+    plat::write_text(plat::join(base, "arquivos.txt"), list);
+}
+#endif
+
 int main(int argc, char** argv) {
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--selftest") && i + 2 < argc) return nb_selftest(atoi(argv[i + 1]), argv[i + 2]);
     }
+#ifdef NB_MOBILE
+    // any orientation: standing up shows the drawn console, lying down the full screen with touch buttons
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight Portrait");
+    SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
+    SDL_SetHint(SDL_HINT_AUDIO_CATEGORY, "playback");
+#endif
+#ifdef __ANDROID__
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) return 1;
+    apk_unpack(plat::exe_dir());
+#endif
     std::string base = plat::exe_dir();
     // installed by a package (Linux .deb in /opt): the game folder is read-only, so saves, settings and
     // captures go to the user's data folder; the creator's default settings are copied there once
@@ -155,8 +202,16 @@ int main(int argc, char** argv) {
             if (px + 40 >= r.x && py >= r.y && px + 40 < r.x + r.w && py + 20 < r.y + r.h) { wx = px; wy = py; ww = pre.geti("janela_w", ww); wh = pre.geti("janela_h", wh); break; }
         }
     }
+#ifdef NB_MOBILE
+    SDL_Window* win = SDL_CreateWindow(title.c_str(), wx, wy, ww, wh, SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_HIDDEN
+#ifdef __ANDROID__
+                                       | SDL_WINDOW_FULLSCREEN
+#endif
+                                       );
+#else
     SDL_Window* win = SDL_CreateWindow(title.c_str(), wx, wy, ww, wh,
                                        SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_HIDDEN);
+#endif
     if (!win) { plat::message_box(nb_game_name(), std::string("Não foi possível criar a janela:\n") + SDL_GetError(), true); return 1; }
     {   // the game's own icon on the window / taskbar
         std::vector<uint32_t> ipx; int iw, ih;
@@ -210,6 +265,13 @@ int main(int argc, char** argv) {
         while (SDL_PollEvent(&e)) {
             ImGui_ImplSDL2_ProcessEvent(&e);
             if (e.type == SDL_QUIT) player.power_off_begin();        // the screen turns off first (if enabled)
+            // phone: the app goes to the background (home button, a call). Android may close it there
+            // without warning, so everything is saved now; the game waits paused until it comes back
+            if (e.type == SDL_APP_WILLENTERBACKGROUND || e.type == SDL_APP_TERMINATING) {
+                player.suspend_save();
+                if (!player.paused) { player.paused = true; auto_paused = true; }
+            }
+            if (e.type == SDL_APP_DIDENTERFOREGROUND && auto_paused) { player.paused = false; auto_paused = false; player.frame_ready = true; }
             if (e.type == SDL_WINDOWEVENT) {
                 if (e.window.event == SDL_WINDOWEVENT_CLOSE) player.power_off_begin();
                 // pause (and silence) while the window is in the background or minimized, like PC games
@@ -244,6 +306,11 @@ int main(int argc, char** argv) {
         if (player.want_quit) { player.want_quit = false; player.power_off_begin(); }
         if (player.power_off_done()) quit = true;
         if (player.want_minimize) { player.want_minimize = false; SDL_MinimizeWindow(win); }
+#ifdef NB_MOBILE
+        // (a phone has no windows to resize: the screen is the window)
+        player.want_fullscreen_toggle = false; player.want_display_apply = false; player.want_resize = false;
+        cur_console = player.console_on(); first_console_check = false;
+#endif
         // console look on / off: window without borders, dragged by the body, shaped like the device
         if (player.console_on() != cur_console) {
             cur_console = player.console_on();

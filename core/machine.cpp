@@ -1642,6 +1642,8 @@ void WideScout::step(Machine& m, int frames_per_call) {
 }
 // ------------------------------------------------------------------ run-ahead
 // (the raw copy of the first part also carries the unused bytes between fields, so saved states stay byte-identical)
+void Machine::ahead_drop_sound() { apu->out.clear(); }
+
 void Machine::ahead_keep_apu(RunAhead& ra) {
     if (!ra.apu) ra.apu = std::make_shared<Apu>(*apu); else *ra.apu = *apu;
     memcpy((void*)ra.apu.get(), (const void*)apu, offsetof(Apu, out));

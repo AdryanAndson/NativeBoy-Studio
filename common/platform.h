@@ -1,6 +1,10 @@
 // Small platform layer (Windows first, Linux for development builds).
 // All strings are UTF-8.
 #pragma once
+// phones and tablets (Android): touch controls, files inside the app, no windows to move
+#if defined(__ANDROID__) && !defined(NB_MOBILE)
+#define NB_MOBILE 1
+#endif
 #include <cstdio>
 #include <cstdint>
 #include <functional>
