@@ -332,7 +332,8 @@ if [ -x "$GB" ] && [ -d "$SDKR/sdk" ] && [ -f "$N/tests/roms/smart_test.gb" ]; t
   rm -rf "$T"
 fi
 # 4b. APK on GitHub: Android project + upload/compile/download against a fake GitHub (no internet)
-if [ -x "$N/build/host/apktest" ] && [ -x "$PP/NativeBoyStudio" ] && [ -f "$N/tests/roms/botoes_test.gb" ] && command -v curl >/dev/null; then
+PP=${PP:-$(ls -d "$N"/dist/linux/NativeBoyStudio-*-linux-x64 2>/dev/null | tail -1)}
+if [ -x "$N/build/host/apktest" ] && [ -n "$PP" ] && [ -x "$PP/NativeBoyStudio" ] && [ -f "$N/tests/roms/botoes_test.gb" ] && command -v curl >/dev/null; then
   T=$(mktemp -d)
   HOME="$T/home" XDG_DATA_HOME= "$PP/NativeBoyStudio" --convert "$N/tests/roms/botoes_test.gb" --export --android --frames 600 --projects "$T/p" --games "$T/j" > "$T/conv.log" 2>&1
   AP=$(grep -m1 "^ANDROID:" "$T/conv.log" | sed 's/^ANDROID: //')
