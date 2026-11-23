@@ -1,4 +1,7 @@
 #include "platform.h"
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -48,9 +51,6 @@ static std::string U(const std::wstring& w) {
 #endif
 
 std::string exe_dir() {
-#if defined(__ANDROID__)
-#include <android/log.h>
-#endif
 #if defined(__ANDROID__)
     // the app's private folder: the game files are copied there from the APK on the first start
     const char* p = SDL_AndroidGetInternalStoragePath();
