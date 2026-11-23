@@ -14,6 +14,7 @@
 #include <SDL_syswm.h>
 #include <windows.h>
 #endif
+#include <cstdlib>
 #include <cstring>
 #include <string>
 
@@ -152,6 +153,11 @@ int main(int argc, char** argv) {
     SDL_SetHint(SDL_HINT_AUDIO_CATEGORY, "playback");
 #endif
 #ifdef __ANDROID__
+    // SDL may start main again in the same process while Android is closing the screen; then there is
+    // no screen to draw on, and an error box would hang the closing: leave at once
+    static bool started = false;
+    if (started) { NB_STEP("início repetido ignorado"); return 0; }
+    started = true;
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) return 1;
     NB_STEP("SDL iniciado; pasta %s", plat::exe_dir().c_str());
     apk_unpack(plat::exe_dir());
@@ -277,16 +283,17 @@ int main(int argc, char** argv) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             ImGui_ImplSDL2_ProcessEvent(&e);
-            if (e.type == SDL_QUIT) player.power_off_begin();        // the screen turns off first (if enabled)
+            if (e.type == SDL_QUIT) { NB_STEP("pedido para fechar (SDL_QUIT)"); player.power_off_begin(); }        // the screen turns off first (if enabled)
             // phone: the app goes to the background (home button, a call). Android may close it there
             // without warning, so everything is saved now; the game waits paused until it comes back
             if (e.type == SDL_APP_WILLENTERBACKGROUND || e.type == SDL_APP_TERMINATING) {
+                NB_STEP(e.type == SDL_APP_TERMINATING ? "o Android vai fechar o app" : "app foi para o fundo");
                 player.suspend_save();
                 if (!player.paused) { player.paused = true; auto_paused = true; }
             }
             if (e.type == SDL_APP_DIDENTERFOREGROUND && auto_paused) { player.paused = false; auto_paused = false; player.frame_ready = true; }
             if (e.type == SDL_WINDOWEVENT) {
-                if (e.window.event == SDL_WINDOWEVENT_CLOSE) player.power_off_begin();
+                if (e.window.event == SDL_WINDOWEVENT_CLOSE) { NB_STEP("janela fechada"); player.power_off_begin(); }
                 // pause (and silence) while the window is in the background or minimized, like PC games
                 bool lost = e.window.event == SDL_WINDOWEVENT_FOCUS_LOST || e.window.event == SDL_WINDOWEVENT_MINIMIZED;
                 bool back = e.window.event == SDL_WINDOWEVENT_FOCUS_GAINED || e.window.event == SDL_WINDOWEVENT_RESTORED;
@@ -316,7 +323,7 @@ int main(int argc, char** argv) {
         if (want_title != cur_title) { SDL_SetWindowTitle(win, want_title.c_str()); cur_title = want_title; }
         bool on_top = player.cfg.getb("sempre_no_topo", false);
         if (on_top != cur_on_top) { SDL_SetWindowAlwaysOnTop(win, on_top ? SDL_TRUE : SDL_FALSE); cur_on_top = on_top; }
-        if (player.want_quit) { player.want_quit = false; player.power_off_begin(); }
+        if (player.want_quit) { NB_STEP("sair pelo jogo (menu ou console)"); player.want_quit = false; player.power_off_begin(); }
         if (player.power_off_done()) quit = true;
         if (player.want_minimize) { player.want_minimize = false; SDL_MinimizeWindow(win); }
 #ifdef NB_MOBILE
@@ -387,5 +394,9 @@ int main(int argc, char** argv) {
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);
     SDL_Quit();
+    NB_STEP("jogo fechado");
+#ifdef __ANDROID__
+    exit(0);   // (the process ends with the game: the next start is a clean one)
+#endif
     return 0;
 }

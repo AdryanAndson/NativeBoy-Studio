@@ -13,6 +13,9 @@ falhou() {
   sleep 2
   echo "=== passos do jogo / erros ==="
   grep -E "NativeBoy|SDL|AndroidRuntime|FATAL|DEBUG|libc |ANR in|boy\.jogo|JogoActivity|linker" telas/logcat.txt | grep -v "PREVIA" | tail -120
+  echo "=== sistema (atividade e janelas) ==="
+  P=$(grep -m1 -oE "I/NativeBoy\( *[0-9]+\)" telas/logcat.txt | grep -oE "[0-9]+")
+  grep -E "ActivityTaskManager|ActivityManager|WindowManager|SDL|\( *${P:-0}\)" telas/logcat.txt | grep -vE "PREVIA|chatty" | head -150
   echo "=== rastros (ANR) ==="
   adb shell 'ls /data/anr/; for f in /data/anr/*; do echo "--- $f"; sed -n "1,400p" "$f"; done' 2>&1 | grep -vE "^\s*$" | grep -A60 -E "\"main\"|\"SDLThread\"|----- pid" | head -300
   adb exec-out screencap -p > telas/falha.png
