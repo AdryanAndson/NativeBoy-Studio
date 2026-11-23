@@ -98,6 +98,13 @@ static void save_window(SDL_Window* w, GamePlayer& p) {
 }
 
 #ifdef __ANDROID__
+#include <android/log.h>
+// steps of the start in the Android log (adb logcat -s NativeBoy)
+#define NB_STEP(...) __android_log_print(ANDROID_LOG_INFO, "NativeBoy", __VA_ARGS__)
+#else
+#define NB_STEP(...) ((void)0)
+#endif
+#ifdef __ANDROID__
 // Android: the game's files (assets/, config/) travel inside the APK. On the first start, and after an
 // update of the app, they are copied to the app's private folder, where the game reads them like on a PC.
 // arquivos.txt (made by the Studio) lists them. The player's own settings are never overwritten.
@@ -146,7 +153,9 @@ int main(int argc, char** argv) {
 #endif
 #ifdef __ANDROID__
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) return 1;
+    NB_STEP("SDL iniciado; pasta %s", plat::exe_dir().c_str());
     apk_unpack(plat::exe_dir());
+    NB_STEP("arquivos do APK prontos");
 #endif
     std::string base = plat::exe_dir();
     // installed by a package (Linux .deb in /opt): the game folder is read-only, so saves, settings and
@@ -213,6 +222,7 @@ int main(int argc, char** argv) {
                                        SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_HIDDEN);
 #endif
     if (!win) { plat::message_box(nb_game_name(), std::string("Não foi possível criar a janela:\n") + SDL_GetError(), true); return 1; }
+    NB_STEP("janela criada");
     {   // the game's own icon on the window / taskbar
         std::vector<uint32_t> ipx; int iw, ih;
         if (load_png(plat::join(base, "assets/icone.png"), ipx, iw, ih)) {
@@ -229,6 +239,7 @@ int main(int argc, char** argv) {
     SDL_Renderer* ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | (vsync ? SDL_RENDERER_PRESENTVSYNC : 0));
     if (!ren) ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
     if (!ren) { plat::message_box(nb_game_name(), std::string("Não foi possível iniciar o renderizador:\n") + SDL_GetError(), true); return 1; }
+    NB_STEP("renderizador criado");
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -238,6 +249,7 @@ int main(int argc, char** argv) {
     ui::load_fonts(base, 18.0f);
     ImGui_ImplSDL2_InitForSDLRenderer(win, ren);
     ImGui_ImplSDLRenderer2_Init(ren);
+    NB_STEP("interface pronta");
 
     std::string err;
     // the converted code was verified with (or without) the SGB features: use the same default
@@ -252,6 +264,7 @@ int main(int argc, char** argv) {
     for (auto& kv : pre.kv) if (kv.first == "fidelity" || kv.first == "fullscreen") player.cfg.set(kv.first, kv.second);
     player.apply_settings();
     nb_user_init(player.m);
+    NB_STEP("jogo iniciado");
     if (player.cfg.getb("fullscreen", false)) set_fullscreen(win, player, true);
     int cur_scale = scale;
     bool cur_vsync = vsync;
@@ -362,6 +375,9 @@ int main(int argc, char** argv) {
         player.render(ren, area);
         ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(), ren);
         SDL_RenderPresent(ren);
+#ifdef __ANDROID__
+        { static int shown = 0; if (shown < 3 && ++shown) NB_STEP("quadro %d desenhado", shown); }
+#endif
     }
     save_window(win, player);
     player.stop();

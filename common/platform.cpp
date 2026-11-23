@@ -49,6 +49,9 @@ static std::string U(const std::wstring& w) {
 
 std::string exe_dir() {
 #if defined(__ANDROID__)
+#include <android/log.h>
+#endif
+#if defined(__ANDROID__)
     // the app's private folder: the game files are copied there from the APK on the first start
     const char* p = SDL_AndroidGetInternalStoragePath();
     return p ? p : ".";
@@ -500,6 +503,9 @@ void open_in_explorer(const std::string& path) { std::string c = "xdg-open " + q
 void open_url(const std::string& url) { open_in_explorer(url); }
 void message_box(const std::string& title, const std::string& text, bool error) {
     fprintf(stderr, "[%s] %s\n", title.c_str(), text.c_str());
+#ifdef __ANDROID__
+    __android_log_print(error ? ANDROID_LOG_ERROR : ANDROID_LOG_INFO, "NativeBoy", "[%s] %s", title.c_str(), text.c_str());
+#endif
     SDL_ShowSimpleMessageBox(error ? SDL_MESSAGEBOX_ERROR : SDL_MESSAGEBOX_INFORMATION, title.c_str(), text.c_str(), nullptr);
 }
 ProcResult run(const std::string& cmdline, const std::string& cwd, const std::vector<std::pair<std::string, std::string>>& env) {
