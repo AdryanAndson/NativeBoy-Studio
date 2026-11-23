@@ -7,6 +7,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    env:
+      DEPS: ${{ github.workspace }}/deps
     steps:
       - uses: actions/checkout@v4
       - name: Pacotes do sistema

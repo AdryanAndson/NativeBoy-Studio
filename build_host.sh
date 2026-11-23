@@ -23,8 +23,6 @@ $CX -o build/host/reloctest tools/reloctest.cpp build/host/libnbcore.a
 $CX -o build/host/exttest tools/exttest.cpp build/host/libnbcore.a
 $CX -o build/host/memtest tools/memtest.cpp build/host/libnbcore.a
 $CX -o build/host/lagtest tools/lagtest.cpp build/host/libnbcore.a
-$CX -o build/host/memtest tools/memtest.cpp build/host/libnbcore.a
-$CX -o build/host/lagtest tools/lagtest.cpp build/host/libnbcore.a
 $CX -o build/host/diagtest tools/diagtest.cpp build/host/libnbcore.a
 $CX -pthread -o build/host/nettest tools/nettest.cpp common/link.cpp build/host/libnbcore.a
 $CX -I${DEPS:-../deps}/stb $(sdl2-config --cflags) -o build/host/hdtest tools/hdtest.cpp common/video.cpp common/platform.cpp common/settings.cpp build/host/libnbcore.a $(sdl2-config --libs)

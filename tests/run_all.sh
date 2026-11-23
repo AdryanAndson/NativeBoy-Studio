@@ -11,7 +11,7 @@ N=$(cd "$(dirname "$0")/.." && pwd)
 R=${1:-$N/../testroms}
 RGBDS=${2:-$N/../deps/rgbds}
 OUT=$N/tests/RESULTADOS.md
-"$N/build_host.sh" >/dev/null 2>&1 || { echo "build failed"; exit 1; }
+"$N/build_host.sh" > /tmp/nb_build_host.log 2>&1 || { echo "build failed"; tail -40 /tmp/nb_build_host.log; exit 1; }
 pass=0; fail=0
 ok() { echo "| $1 | OK | $2 |" >> "$OUT"; pass=$((pass+1)); }
 ko() { echo "| $1 | FALHOU | $2 |" >> "$OUT"; fail=$((fail+1)); }
