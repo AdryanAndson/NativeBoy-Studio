@@ -26,6 +26,7 @@ falhou() {
   adb shell 'ls /data/anr/; for f in /data/anr/*; do echo "--- $f"; sed -n "1,400p" "$f"; done' 2>&1 | grep -vE "^\s*$" | grep -A60 -E "\"main\"|\"SDLThread\"|----- pid" | head -300
   adb exec-out screencap -p > telas/falha.png
   kill $LOGPID 2>/dev/null
+  for f in telas/*.png; do convert "$f" -resize 480x480 -quality 70 "${f%.png}.jpg" && echo "PREVIA $f $(base64 -w0 "${f%.png}.jpg")"; done
   echo "O APP FECHOU ($1)"
   exit 1
 }
@@ -40,9 +41,8 @@ grep -E "NativeBoy" telas/logcat.txt
 adb emu rotate
 sleep 6
 adb exec-out screencap -p > telas/2_deitado.png
-# "Novo jogo" on the start screen (middle of the screen, a bit above the center)
-read W0 H0 < <(adb shell wm size | sed -n 's/.*: \([0-9]*\)x\([0-9]*\).*/\2 \1/p')
-adb shell input tap $(( W0 / 2 )) $(( H0 * 47 / 100 ))
+# "Novo jogo" (the highlighted option of the start screen; its place depends on the menu size)
+adb shell input keyevent 66
 sleep 4
 adb exec-out screencap -p > telas/2b_jogando.png
 # holds A on the screen buttons (landscape 2280x1080 on pixel_4: A is near the right edge, middle height)
