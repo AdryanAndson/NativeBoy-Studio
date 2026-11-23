@@ -193,7 +193,14 @@ bool GamePlayer::start(const std::vector<u8>& rom, const std::string& bd, const 
 #ifdef NB_MOBILE
     // phones: the drawn console when standing up, bigger menus, run-ahead off (battery)
     if (!cfg.kv.count("visual_console")) cfg.set("visual_console", "auto");
-    if (!cfg.kv.count("escala_interface")) cfg.seti("escala_interface", 170);
+    // menu size from the screen density (Android's "dp": 160 dots per inch = 100%), a bit smaller than
+    // the system text because the menu font is already large
+    if (!cfg.kv.count("escala_interface")) {
+        float ddpi = 0;
+        int ui = 170;
+        if (SDL_GetDisplayDPI(0, &ddpi, nullptr, nullptr) == 0 && ddpi > 60) ui = (int)(ddpi / 160.f * 80.f + 0.5f);
+        cfg.seti("escala_interface", std::max(120, std::min(NB_UI_MAX, ui)));
+    }
     if (!cfg.kv.count("run_ahead")) cfg.seti("run_ahead", 0);
     if (!haptic && SDL_InitSubSystem(SDL_INIT_HAPTIC) == 0 && SDL_NumHaptics() > 0) {
         haptic = SDL_HapticOpen(0);
@@ -1166,7 +1173,7 @@ void GamePlayer::draw_menu(const SDL_Rect& area) {
     if (ask_continue) { draw_continue_prompt(area); return; }
     if (start_screen && !menu_open) { draw_start_screen(area); return; }
     if (!menu_open) { draw_topbar(area); g_menu_was_open = false; return; }
-    float uis = std::max(100, std::min(200, cfg.geti("escala_interface", 100))) / 100.f;
+    float uis = std::max(100, std::min(NB_UI_MAX, cfg.geti("escala_interface", 100))) / 100.f;
     // pause screen: the whole window, the game dimmed behind it, sections listed on the left
     static const char* sections[10] = {"Jogo", "Vídeo", "Áudio", "Controles", "Trapaças", "Acessibilidade", "Mods", "Sobre", "Conquistas", "Capturas"};
     const int* order = MENU_ORDER;
@@ -1178,10 +1185,11 @@ void GamePlayer::draw_menu(const SDL_Rect& area) {
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.06f, 0.04f, 0.13f, 0.86f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+    // menu size: the font size itself, so the inner panels (sections, buttons) grow too
+    ImGui::PushFont(nullptr, ui::base_size * uis);
     ImGui::Begin("##pausa", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
     ImGui::PopStyleVar(2);
     ImGui::PopStyleColor();
-    ImGui::SetWindowFontScale(uis);
     if (ImGui::IsWindowAppearing()) ImGui::SetWindowFocus();
     {   // colour stripe along the top, like the Studio
         ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -1653,7 +1661,7 @@ void GamePlayer::draw_menu(const SDL_Rect& area) {
             ImGui::EndDisabled();
             int ui = cfg.geti("escala_interface", 100);
             ImGui::SetNextItemWidth(std::min(220.f * uis, ImGui::GetContentRegionAvail().x * 0.55f));
-            if (ImGui::SliderInt("Tamanho do menu", &ui, 100, 200, "%d%%")) cfg.seti("escala_interface", ui);
+            if (ImGui::SliderInt("Tamanho do menu", &ui, 100, NB_UI_MAX, "%d%%")) cfg.seti("escala_interface", ui);
             if (ImGui::IsItemDeactivatedAfterEdit()) cfg.save();
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Aumenta o texto deste menu (bom para jogar na TV).");
             bool ab = cfg.getb("abertura", true);
@@ -1731,4 +1739,5 @@ void GamePlayer::draw_menu(const SDL_Rect& area) {
     ImGui::EndGroup();
     want_tab = -1;
     ImGui::End();
+    ImGui::PopFont();
 }

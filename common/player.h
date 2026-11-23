@@ -15,6 +15,12 @@
 #include "recorder.h"
 #include <map>
 struct ImDrawList;
+// largest menu size (%): phones have dense screens and need more
+#ifdef NB_MOBILE
+#define NB_UI_MAX 400
+#else
+#define NB_UI_MAX 200
+#endif
 #include <memory>
 #include <SDL.h>
 #include <string>

@@ -117,7 +117,7 @@ bool GamePlayer::rewind_jump(size_t back) {
 void GamePlayer::draw_timeline_section() {
     if (!cfg.getb("rebobinar", true) || fidelity()) return;
     ImGui::SeparatorText("Voltar no tempo");
-    if (rw_count == 0) { ImGui::TextDisabled("Jogue um pouco: os últimos momentos aparecem aqui para você voltar."); return; }
+    if (rw_count == 0) { ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled)); ImGui::TextWrapped("Jogue um pouco: os últimos momentos aparecem aqui para você voltar."); ImGui::PopStyleColor(); return; }
     const size_t cap = rewind_ring.size();
     auto idx_back = [&](size_t back) { return (rw_head + cap - 1 - back) % cap; };
     if (tl_serial != rw_serial) {         // timeline changed: forget the pictures
@@ -143,7 +143,7 @@ void GamePlayer::draw_timeline_section() {
         char b[32]; if (s >= 60) snprintf(b, sizeof b, "-%d:%02d", s / 60, s % 60); else if (s > 0) snprintf(b, sizeof b, "-%d s", s); else snprintf(b, sizeof b, "agora");
         return std::string(b);
     };
-    const float uis = std::max(100, std::min(200, cfg.geti("escala_interface", 100))) / 100.f;
+    const float uis = std::max(100, std::min(NB_UI_MAX, cfg.geti("escala_interface", 100))) / 100.f;
     ImGui::TextDisabled("%.0f s guardados. Escolha uma imagem e volte para aquele momento.", rewind_seconds());
     // strip: up to 8 pictures spread over the stored time (oldest on the left)
     const float avail = ImGui::GetContentRegionAvail().x;
@@ -214,7 +214,9 @@ void GamePlayer::drop_thumb(int slot) {
 
 void GamePlayer::draw_states_section() {
     ImGui::SeparatorText("Estados salvos");
-    const float tw = 168, th = 151;
+    // (wide enough for "Salvar" and "Carregar" side by side at any menu size)
+    const float pad = ImGui::GetStyle().FramePadding.x * 2;
+    const float tw = std::max(168.f, (ImGui::CalcTextSize("Carregar").x + pad) * 2 + 8), th = tw * 144.f / 160.f;
     float avail = ImGui::GetContentRegionAvail().x;
     int per_row = std::max(1, (int)(avail / (tw + 24)));
     for (int s = 1; s <= 8; s++) {
@@ -249,7 +251,7 @@ void GamePlayer::draw_continue_prompt(const SDL_Rect& area) {
     ImGui::SetNextWindowPos(ImVec2(area.x + area.w * 0.5f, area.y + area.h * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     ImGui::Begin("Continuar?", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
                                         ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings);
-    float uis = std::max(100, std::min(200, cfg.geti("escala_interface", 100))) / 100.f;
+    float uis = std::max(100, std::min(NB_UI_MAX, cfg.geti("escala_interface", 100))) / 100.f;
     ImGui::SetWindowFontScale(uis * 1.15f);
     ImGui::Text("%s", game_name.c_str());
     ImGui::TextDisabled("Você parou em %s", slot_info(0).c_str());
@@ -514,7 +516,7 @@ std::string GamePlayer::play_time_text() const {
 
 // ------------------------------------------------------------------ title screen
 void GamePlayer::draw_start_screen(const SDL_Rect& area) {
-    float uis = std::max(100, std::min(200, cfg.geti("escala_interface", 100))) / 100.f;
+    float uis = std::max(100, std::min(NB_UI_MAX, cfg.geti("escala_interface", 100))) / 100.f;
     float bw = 380 * uis;
     ImGui::SetNextWindowPos(ImVec2((float)area.x, (float)area.y));
     ImGui::SetNextWindowSize(ImVec2((float)area.w, (float)area.h));

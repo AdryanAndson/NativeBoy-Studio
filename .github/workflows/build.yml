@@ -14,7 +14,7 @@ jobs:
       - name: Pacotes do sistema
         run: |
           sudo apt-get update
-          sudo apt-get install -y g++ mingw-w64 nsis imagemagick p7zip-full libsdl2-dev dpkg-dev fonts-dejavu-core zenity xvfb xdotool
+          sudo apt-get install -y g++ mingw-w64 nsis imagemagick p7zip-full libsdl2-dev dpkg-dev fonts-dejavu-core zenity xvfb xdotool python3-pil curl
       - name: Dependências fixas
         run: DEPS=$PWD/deps scripts/fetch_deps.sh
       - name: Testes verificáveis
