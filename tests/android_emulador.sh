@@ -4,6 +4,12 @@
 APK=$1; PKG=$2
 mkdir -p telas
 adb root >/dev/null 2>&1; sleep 2
+adb wait-for-device
+# the emulator has just booted: waits for Android to finish starting (home screen included). Opening the
+# app during that start can make Android close it, which says nothing about the game
+until [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = 1 ]; do sleep 2; done
+sleep 25
+adb shell input keyevent 82; adb shell input keyevent 3; sleep 5
 adb install -r "$APK" || exit 1
 adb logcat -c
 adb logcat -v time > telas/logcat.txt 2>&1 &
