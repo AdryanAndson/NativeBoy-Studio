@@ -4,7 +4,7 @@ set -e
 cd "$(dirname "$0")"
 N=$(pwd)
 if [ -n "${DEPS:-}" ]; then D=$DEPS; elif [ -d "$N/deps" ]; then D=$N/deps; else D=$(cd "$N/.." && pwd)/deps; fi
-VER=1.16.0
+VER=1.17.0
 OUT=$N/build/linux
 PKG=$N/dist/linux/pkg
 APP=$PKG/opt/nativeboy-studio

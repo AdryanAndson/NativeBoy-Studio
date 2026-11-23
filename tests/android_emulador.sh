@@ -34,6 +34,11 @@ grep -E "NativeBoy" telas/logcat.txt
 adb emu rotate
 sleep 6
 adb exec-out screencap -p > telas/2_deitado.png
+# "Novo jogo" on the start screen (middle of the screen, a bit above the center)
+read W0 H0 < <(adb shell wm size | sed -n 's/.*: \([0-9]*\)x\([0-9]*\).*/\2 \1/p')
+adb shell input tap $(( W0 / 2 )) $(( H0 * 47 / 100 ))
+sleep 4
+adb exec-out screencap -p > telas/2b_jogando.png
 # holds A on the screen buttons (landscape 2280x1080 on pixel_4: A is near the right edge, middle height)
 read W H < <(adb shell wm size | sed -n 's/.*: \([0-9]*\)x\([0-9]*\).*/\2 \1/p')
 M=$(( H < W ? H : W ))
@@ -44,6 +49,10 @@ adb exec-out screencap -p > telas/3_apertando_A.png
 wait %2 2>/dev/null; sleep 3
 adb exec-out screencap -p > telas/4_soltou.png
 adb shell pidof "$PKG" || falhou "deitado"
+# while A is held its box in the test game is filled: the two pictures must differ
+DIF=$(compare -metric AE telas/3_apertando_A.png telas/4_soltou.png null: 2>&1 | cut -d' ' -f1)
+echo "pixels diferentes com A apertado: $DIF"
+[ "${DIF%.*}" -gt 100 ] 2>/dev/null || falhou "o botão A na tela não respondeu"
 # back button: the menu
 adb shell input keyevent 4
 sleep 2

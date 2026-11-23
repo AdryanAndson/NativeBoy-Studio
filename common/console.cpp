@@ -165,8 +165,10 @@ void GamePlayer::console_draw(SDL_Renderer* r, const SDL_Rect& area) {
     if (winbtn) {
         const SDL_Color ic = shade(s.body2, 0.78f);
         circle(r, c.menu_btn.x, c.menu_btn.y, c.icon_r, ic, ic);
+#ifndef NB_MOBILE   // (a phone has no windows to minimize or close: only the menu button)
         circle(r, c.min_btn.x, c.min_btn.y, c.icon_r, ic, ic);
         circle(r, c.close_btn.x, c.close_btn.y, c.icon_r, ic, ic);
+#endif
     }
     // screen surround
     if (c.style == 0) poly(r, rrect_pts(c.bezel.x, c.bezel.y, c.bezel.w, c.bezel.h, 26 * u, 26 * u, 110 * u, 26 * u), shade(s.bezel, 1.05f), shade(s.bezel, 0.92f));
@@ -283,9 +285,11 @@ void GamePlayer::console_labels() {
     const ImU32 ic = IM_COL32(s.text.r, s.text.g, s.text.b, 210);
     const float ir = c.icon_r * 0.5f;
     for (int k = -1; k <= 1; k++) dl->AddLine(ImVec2(c.menu_btn.x - ir, c.menu_btn.y + k * ir * 0.6f), ImVec2(c.menu_btn.x + ir, c.menu_btn.y + k * ir * 0.6f), ic, 2.5f * std::max(0.6f, u * 2));
+#ifndef NB_MOBILE
     dl->AddLine(ImVec2(c.min_btn.x - ir, c.min_btn.y), ImVec2(c.min_btn.x + ir, c.min_btn.y), ic, 2.5f * std::max(0.6f, u * 2));
     dl->AddLine(ImVec2(c.close_btn.x - ir, c.close_btn.y - ir), ImVec2(c.close_btn.x + ir, c.close_btn.y + ir), ic, 2.5f * std::max(0.6f, u * 2));
     dl->AddLine(ImVec2(c.close_btn.x - ir, c.close_btn.y + ir), ImVec2(c.close_btn.x + ir, c.close_btn.y - ir), ic, 2.5f * std::max(0.6f, u * 2));
+#endif
 }
 
 // what is under a point of the window: buttons of the game, window buttons, the screen, the body
@@ -296,8 +300,10 @@ GamePlayer::ConsoleHit GamePlayer::console_hit(float px, float py) const {
     auto d2 = [&](SDL_FPoint p) { return (px - p.x) * (px - p.x) + (py - p.y) * (py - p.y); };
     const float ir = c.icon_r * 1.4f;
     if (d2(c.menu_btn) < ir * ir) { h.kind = ConsoleHit::MENU; return h; }
+#ifndef NB_MOBILE
     if (d2(c.min_btn) < ir * ir) { h.kind = ConsoleHit::MINIMIZE; return h; }
     if (d2(c.close_btn) < ir * ir) { h.kind = ConsoleHit::CLOSE; return h; }
+#endif
     const float ar = c.ab_r * 1.25f;
     if (d2(c.a) < ar * ar) { h.kind = ConsoleHit::BUTTON; h.buttons = BTN_A; return h; }
     if (d2(c.b) < ar * ar) { h.kind = ConsoleHit::BUTTON; h.buttons = BTN_B; return h; }

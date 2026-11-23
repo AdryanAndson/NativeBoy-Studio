@@ -1,4 +1,4 @@
-# NativeBoy Studio 1.7.0
+# NativeBoy Studio 1.17.0
 
 Ferramenta de desktop para **Windows 10/11 x64** e **Linux x64 (Ubuntu/Lubuntu 24.04 ou mais novo)** que analisa ROMs de Game Boy / Game Boy Color, gera projetos editáveis e **recompila estaticamente** o código SM83 para C++, produzindo executáveis nativos (Windows e Linux) que abrem com dois cliques e não precisam da ROM.
 
@@ -46,6 +46,21 @@ Caminhos do jogo que a verificação não alcançou continuam protegidos: se for
 NomeDoJogo.exe   SDL2.dll   LEIA-ME.txt
 assets\  (fontes, mods\, hd\)    config\  (settings.ini, cheats.txt)    saves\
 ```
+
+Novidades da versão 1.17 (versão para celular Android):
+- Cada jogo convertido pode virar um aplicativo Android (.apk), para instalar direto no celular (sem Play Store).
+  - Na tela Converter, abra "Celular Android (APK)", crie uma chave de acesso do GitHub (o botão abre a página certa; marque "repo" e "workflow"), cole a chave e clique em "Gerar APK no GitHub".
+  - O Studio envia o projeto para um repositório PRIVADO da sua conta, o GitHub compila de graça (uns 10 minutos na primeira vez) e o APK é baixado para "Meus Jogos/Android". Da segunda vez em diante só os arquivos alterados são enviados.
+  - O aplicativo é assinado sempre com a mesma chave (criada pelo GitHub na primeira vez e guardada no repositório), então uma versão nova instala por cima da antiga sem perder os saves.
+  - Para instalar: copie o APK para o celular e abra; o Android pede para permitir "instalar apps desconhecidos".
+  - Também dá para só criar o projeto Android e abrir no Android Studio.
+- No celular:
+  - Em pé: o console desenhado na tela, com os botões dele funcionando ao toque.
+  - Deitado: a imagem do jogo grande, com direcional, A, B, Start, Select, voltar no tempo, acelerar e menu na tela (vários dedos ao mesmo tempo; vibra ao tocar).
+  - Tamanho, transparência e vibração dos botões em Opções > Controles; com um controle Bluetooth/USB os botões da tela somem sozinhos.
+  - O botão Voltar do celular abre o menu. Ao sair do app (botão de início, uma ligação), o jogo pausa e salva tudo.
+  - Menu de opções adaptado para tela estreita, com rolagem pelo dedo.
+- Testado num emulador de Android (API 30) no GitHub a cada mudança; não foi testado em celulares reais.
 
 Novidades da versão 1.16 (voltar no tempo, cabo link pela internet, textos, HD, capas e widescreen):
 - Voltar no tempo, segunda geração:

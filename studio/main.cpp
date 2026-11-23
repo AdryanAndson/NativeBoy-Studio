@@ -23,7 +23,7 @@
 #include <map>
 #include <memory>
 
-#define NB_VERSION "1.16.0"
+#define NB_VERSION "1.17.0"
 #ifdef _WIN32
 #define NB_PLAT "Windows x64"
 #define NB_TOOLCHAIN "GCC (w64devkit, incluído)"

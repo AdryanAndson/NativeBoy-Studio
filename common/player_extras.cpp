@@ -612,7 +612,11 @@ void GamePlayer::draw_start_screen(const SDL_Rect& area) {
     default: break;
     }
     ImGui::SetWindowFontScale(uis);
+#ifdef NB_MOBILE
+    const char* hint = "Toque numa opção    Voltar do celular: opções";
+#else
     const char* hint = "Setas ou direcional: escolher    Enter, A ou Start: confirmar    Esc: opções";
+#endif
     ImVec2 hs = ImGui::CalcTextSize(hint);
     ImGui::SetCursorPos(ImVec2(cx - hs.x / 2, area.h - hs.y - 18));
     ImGui::TextDisabled("%s", hint);
