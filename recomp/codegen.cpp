@@ -287,7 +287,7 @@ bool generate_cpp(const Analysis& a, const std::string& out, const CodegenOption
         std::ostringstream o;
         o << "    .section .rodata\n    .balign 16\n    .globl nb_rom_data\nnb_rom_data:\n    .incbin \"rom.bin\"\n"
              "    .balign 4\n    .globl nb_rom_size\nnb_rom_size:\n    .long " << a.rom.size() << "\n"
-             "#ifdef __ELF__\n    .section .note.GNU-stack,\"\",@progbits\n#endif\n";
+             "#if defined(__ELF__) && defined(__arm__)\n    .section .note.GNU-stack,\"\",%progbits\n#elif defined(__ELF__)\n    .section .note.GNU-stack,\"\",@progbits\n#endif\n";
         if (!write_file(out + "/rom_data.S", o.str(), err)) return false;
         res.files.push_back("rom_data.S");
     }
