@@ -26,3 +26,4 @@ $CX -o build/host/lagtest tools/lagtest.cpp build/host/libnbcore.a
 $CX -o build/host/diagtest tools/diagtest.cpp build/host/libnbcore.a
 $CX -pthread -o build/host/nettest tools/nettest.cpp common/link.cpp build/host/libnbcore.a
 $CX -I${DEPS:-../deps}/stb $(sdl2-config --cflags) -o build/host/hdtest tools/hdtest.cpp common/video.cpp common/platform.cpp common/settings.cpp build/host/libnbcore.a $(sdl2-config --libs)
+$CX -I${DEPS:-../deps}/stb $(sdl2-config --cflags) -o build/host/apktest tools/apktest.cpp studio/github_apk.cpp common/platform.cpp common/settings.cpp $(sdl2-config --libs)

@@ -67,5 +67,10 @@ std::string tool_path(const std::string& p);
 bool is_ascii(const std::string& s);
 // HTTP GET (used by the update checker). Returns false on any error.
 bool http_get(const std::string& url, std::string& body, std::string& err);
+// HTTPS request with headers and body (GitHub API). status = HTTP code (0 = no answer).
+// follow = follow redirects (the extra headers are not sent to the other site: signed download links)
+struct HttpResult { int status = 0; std::string body, location; };
+bool http_request(const std::string& method, const std::string& url, const std::vector<std::string>& headers,
+                  const std::string& body, HttpResult& res, std::string& err, bool follow = false);
 
 } // namespace plat

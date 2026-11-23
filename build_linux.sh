@@ -12,7 +12,7 @@ mkdir -p "$OUT/obj"
 g++ -O2 -o build/host_gen_interp tools/gen_interp.cpp core/optable.cpp
 build/host_gen_interp core/interp_gen.inc
 INC="$(sdl2-config --cflags) -I$D/imgui -I$D/imgui/backends -I$D/stb -I$N/core -I$N/common -DSDL_MAIN_HANDLED"
-SRCS="studio/main.cpp studio/project.cpp studio/toolchain.cpp studio/translate.cpp studio/studio_extras.cpp studio/perfis.cpp recomp/analysis.cpp recomp/codegen.cpp recomp/disasm.cpp
+SRCS="studio/main.cpp studio/project.cpp studio/toolchain.cpp studio/translate.cpp studio/studio_extras.cpp studio/perfis.cpp studio/github_apk.cpp recomp/analysis.cpp recomp/codegen.cpp recomp/disasm.cpp
 core/machine.cpp core/apu.cpp core/sgb.cpp core/interp.cpp core/optable.cpp common/platform.cpp common/settings.cpp common/video.cpp
 common/ui_common.cpp common/player.cpp common/player_extras.cpp common/console.cpp common/touch.cpp common/music.cpp common/recorder.cpp common/link.cpp $D/imgui/imgui.cpp $D/imgui/imgui_draw.cpp $D/imgui/imgui_tables.cpp
 $D/imgui/imgui_widgets.cpp $D/imgui/backends/imgui_impl_sdl2.cpp $D/imgui/backends/imgui_impl_sdlrenderer2.cpp"
@@ -38,7 +38,15 @@ mkdir -p "$APP/assets/fonts" "$APP/sdk/core" "$APP/sdk/common" "$APP/sdk/runtime
 cp /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf "$APP/assets/fonts/"
 cp "$N/data/jogos_gb.txt" "$APP/assets/" 2>/dev/null || cp data/jogos_gb.txt "$APP/assets/"
 ICO=$N/build/win/icon.ico
-[ -f "$ICO" ] || { echo "rode build_win.sh uma vez para gerar o ícone"; exit 1; }
+if [ ! -f "$ICO" ]; then   # (the same icon the Windows build makes)
+  mkdir -p "$N/build/win"
+  convert -size 256x256 xc:none -fill '#1b2a24' -draw 'roundrectangle 8,8 248,248 40,40' \
+    -fill '#9bbc0f' -draw 'rectangle 48,40 208,160' -fill '#0f380f' -draw 'rectangle 64,56 192,144' \
+    -fill '#8bac0f' -font DejaVu-Sans-Bold -pointsize 60 -gravity center -annotate +0-24 'NB' \
+    -fill '#e05050' -draw 'circle 176,204 176,220' -fill '#e05050' -draw 'circle 128,216 128,232' \
+    -fill '#d0d0d0' -draw 'rectangle 56,196 104,208' -draw 'rectangle 74,178 86,226' \
+    -define icon:auto-resize=256,64,48,32,16 "$ICO" || { echo "não foi possível gerar o ícone (ImageMagick)"; exit 1; }
+fi
 convert "$ICO[0]" -resize 256x256 "$PKG/usr/share/icons/hicolor/256x256/apps/nativeboy-studio.png"
 convert "$ICO[0]" -resize 48x48 "$PKG/usr/share/icons/hicolor/48x48/apps/nativeboy-studio.png"
 cp "$PKG/usr/share/icons/hicolor/256x256/apps/nativeboy-studio.png" "$APP/assets/icon.png"
@@ -86,7 +94,7 @@ Version: $VER
 Section: games
 Priority: optional
 Architecture: amd64
-Depends: libc6 (>= 2.39), libsdl2-2.0-0, libsdl2-dev, g++, zenity, xdg-utils, xdg-user-dirs
+Depends: libc6 (>= 2.39), libsdl2-2.0-0, libsdl2-dev, g++, zenity, xdg-utils, xdg-user-dirs, curl
 Recommends: curl, g++-mingw-w64-x86-64-posix
 Installed-Size: $SIZE
 Maintainer: Adryan Andson da Silva <AdryanAndson@users.noreply.github.com>

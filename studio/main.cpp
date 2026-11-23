@@ -9,6 +9,7 @@
 #include "../recomp/disasm.h"
 #include "jobs.h"
 #include "project.h"
+#include "github_apk.h"
 #include "perfis.h"
 #include "studio_extras.h"
 #include "toolchain.h"
@@ -134,6 +135,7 @@ struct App {
     Toolchain tc;
     bool export_windows = false;   // CLI --windows
     bool export_android = false;   // CLI --android (Android project for the APK)
+    bool export_apk = false;       // CLI --apk-github (APK compiled on GitHub; key in NB_GITHUB_TOKEN)
     Toolchain tcw;          // Linux: MinGW-w64 toolchain for Windows .exe (detected on demand)
     Screen screen = SC_HOME;
     std::unique_ptr<Project> proj;
@@ -191,6 +193,9 @@ struct App {
 
     // settings
     char url_buf[256] = "";
+    // Android: APK built on GitHub
+    char gh_token[128] = "";
+    bool gh_remember = false, gh_loaded = false, android_open = false;
 
     std::string projects_root() const { return prefs.get("pasta_projetos", plat::join(plat::join(plat::documents_dir(), "NativeBoy Studio"), "Projetos")); }
     std::string games_root() const { return prefs.get("pasta_jogos", plat::join(plat::join(plat::documents_dir(), "NativeBoy Studio"), "Meus Jogos")); }
@@ -434,6 +439,35 @@ struct App {
         }, [this](bool ok) {
             if (!ok) error("Não foi possível exportar", job.error);
             else { notify("Jogo exportado para Meus Jogos"); plat::open_in_explorer(proj->ini.get("pasta_exportada", "")); }
+        });
+    }
+
+    // Android project in Meus Jogos/Android/<name> (the game must be exported first); with apk = true
+    // the project also goes to GitHub, which compiles the APK
+    void run_android(bool apk) {
+        Project* p = proj.get();
+        std::string root = games_root(), token = gh_token;
+        if (apk && token.empty()) { error("APK no GitHub", "Cole a chave de acesso do GitHub (token) no campo acima."); return; }
+        if (gh_remember) prefs.set("github_token", token); else prefs.set("github_token", "");
+        prefs.save();
+        job.start(apk ? "Gerando o APK de " + p->name : "Projeto Android de " + p->name, [this, p, root, token, apk](BuildLog& log, std::string& err) {
+            std::string out;
+            if (p->ini.get("pasta_exportada", "").empty() || !plat::file_exists(p->ini.get("pasta_exportada", ""))) {
+                if (log.line) log.line("Exportando o jogo primeiro...");
+                if (!p->step_export(root, tc, log, err, out)) return false;
+            }
+            if (!p->make_android_project(root, tc, log, err, out)) return false;
+            if (!apk) return true;
+            ApkResult r;
+            const bool ok = build_apk_on_github(out, token, apk_repo_name(p->name), plat::join(root, "Android"), log, r, err);
+            p->ini.set("apk_repositorio", r.repo_url);
+            if (ok) p->ini.set("apk_arquivo", r.apk);
+            p->save();
+            return ok;
+        }, [this, apk](bool ok) {
+            if (!ok) { error(apk ? "Não foi possível gerar o APK" : "Não foi possível criar o projeto Android", job.error); return; }
+            if (apk) { notify("APK pronto! Copie para o celular e instale."); plat::open_in_explorer(plat::parent(proj->ini.get("apk_arquivo", ""))); }
+            else { notify("Projeto Android criado"); plat::open_in_explorer(proj->ini.get("pasta_android", "")); }
         });
     }
 
@@ -948,6 +982,32 @@ void App::draw_convert() {
     }
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Compila o mesmo código traduzido também para Windows 10/11 64 bits, com o MinGW-w64.\nO resultado vai para \"Meus Jogos/%s (Windows)\" e pode ser copiado para um PC com Windows.", proj->name.c_str());
 #endif
+    // ---- Android
+    if (!gh_loaded) {
+        gh_loaded = true;
+        const std::string t = prefs.get("github_token", "");
+        gh_remember = !t.empty();
+        strncpy(gh_token, t.c_str(), sizeof gh_token - 1);
+    }
+    ImGui::SetNextItemOpen(android_open, ImGuiCond_Once);
+    if ((android_open = ImGui::CollapsingHeader("Celular Android (APK)"))) {
+        ImGui::TextWrapped("Gera um aplicativo Android (.apk) do jogo, com controles na tela, que funciona em pé e deitado. "
+                           "O APK é compilado de graça pelo GitHub, num repositório PRIVADO da sua conta.");
+        ImGui::TextColored(COL_DIM, "1. Crie uma chave de acesso (marque \"repo\" e \"workflow\"):");
+        if (ImGui::SmallButton("Abrir a página do GitHub para criar a chave"))
+            plat::open_url("https://github.com/settings/tokens/new?scopes=repo,workflow&description=NativeBoy%20Studio");
+        ImGui::TextColored(COL_DIM, "2. Cole a chave aqui:");
+        ImGui::SetNextItemWidth(-1);
+        ImGui::InputTextWithHint("##ghtoken", "ghp_...", gh_token, sizeof gh_token, ImGuiInputTextFlags_Password);
+        ImGui::Checkbox("Lembrar a chave neste computador", &gh_remember);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("A chave fica gravada nas preferências do Studio, só neste computador.\nDesmarque em computadores compartilhados.");
+        if (ImGui::Button("Gerar APK no GitHub", ImVec2(-1, 0))) run_android(true);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Envia o projeto Android para o repositório privado \"%s\" e espera o GitHub compilar\n(uns 10 minutos na primeira vez, menos depois). O APK vai para \"Meus Jogos/Android\".\nPara instalar: copie o APK para o celular e abra (permita \"instalar apps desconhecidos\").", apk_repo_name(proj->name).c_str());
+        if (ImGui::Button("Só criar o projeto Android (para o Android Studio)", ImVec2(-1, 0))) run_android(false);
+        const std::string apk = proj->ini.get("apk_arquivo", ""), repo = proj->ini.get("apk_repositorio", "");
+        if (!apk.empty() && plat::file_exists(apk) && ImGui::Button("Abrir pasta do APK", ImVec2(-1, 0))) plat::open_in_explorer(plat::parent(apk));
+        if (!repo.empty() && ImGui::SmallButton("Ver o repositório no GitHub")) plat::open_url(repo);
+    }
     if (ImGui::Button("Abrir pasta do executável", ImVec2(-1, 0))) plat::open_in_explorer(proj->path("build"));
     if (ImGui::Button("Gerar pacote de diagnóstico (.zip)", ImVec2(-1, 0))) make_diagnostics();
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Junta relatórios, registros de compilação e verificação e dados do sistema num .zip\npara enviar a quem for ajudar. Não inclui a ROM nem o código do jogo.");
@@ -1800,6 +1860,13 @@ static int cli_convert(App& app, const std::string& rom, int dframes, int vframe
         std::string out;
         if (!p.make_android_project(app.games_root(), app.tc, log, err, out)) { say("ERRO: " + err); return 8; }
         say("ANDROID: " + out);
+        if (app.export_apk) {
+            const char* tk = getenv("NB_GITHUB_TOKEN");
+            if (!tk || !*tk) { say("ERRO: defina NB_GITHUB_TOKEN com a chave do GitHub"); return 9; }
+            ApkResult r;
+            if (!build_apk_on_github(out, tk, apk_repo_name(p.name), plat::join(app.games_root(), "Android"), log, r, err)) { say("ERRO: " + err); return 9; }
+            say("APK: " + r.apk);
+        }
     }
     if (do_export && app.export_windows) {
         Toolchain w; std::string out;
@@ -1853,6 +1920,7 @@ int main(int argc_, char** argv_) {
                 if (!strcmp(argv[k], "--export")) ex = true;
                 if (!strcmp(argv[k], "--windows")) { ex = true; app.export_windows = true; }
                 if (!strcmp(argv[k], "--android")) { ex = true; app.export_android = true; }
+                if (!strcmp(argv[k], "--apk-github")) { ex = true; app.export_android = true; app.export_apk = true; }
                 if (!strcmp(argv[k], "--projects") && k + 1 < argc) app.prefs.set("pasta_projetos", argv[k + 1]);
                 if (!strcmp(argv[k], "--games") && k + 1 < argc) app.prefs.set("pasta_jogos", argv[k + 1]);
             }

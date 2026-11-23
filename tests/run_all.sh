@@ -331,6 +331,21 @@ if [ -x "$GB" ] && [ -d "$SDKR/sdk" ] && [ -f "$N/tests/roms/smart_test.gb" ]; t
   fi
   rm -rf "$T"
 fi
+# 4b. APK on GitHub: Android project + upload/compile/download against a fake GitHub (no internet)
+if [ -x "$N/build/host/apktest" ] && [ -x "$PP/NativeBoyStudio" ] && [ -f "$N/tests/roms/botoes_test.gb" ] && command -v curl >/dev/null; then
+  T=$(mktemp -d)
+  HOME="$T/home" XDG_DATA_HOME= "$PP/NativeBoyStudio" --convert "$N/tests/roms/botoes_test.gb" --export --android --frames 600 --projects "$T/p" --games "$T/j" > "$T/conv.log" 2>&1
+  AP=$(grep -m1 "^ANDROID:" "$T/conv.log" | sed 's/^ANDROID: //')
+  PORT=$((20000 + RANDOM % 20000))
+  python3 "$N/tests/fake_github.py" $PORT "$T/gh.log" & FG=$!
+  sleep 1
+  if [ -n "$AP" ] && NB_GITHUB_API=http://127.0.0.1:$PORT "$N/build/host/apktest" "$AP" "$T/apk" > "$T/apk.log" 2>&1 && [ -f "$T/apk/Jogo.apk" ] \
+     && grep -q "privado=True" "$T/gh.log" && grep -q "arvore .* workflow" "$T/gh.log" && grep -q "^  1 arquivo(s) enviados" "$T/apk.log"; then
+    ok "APK pelo GitHub (servidor de teste)" "projeto Android de $(find "$AP" -type f | wc -l) arquivos; repositório privado; 2º envio só o arquivo alterado; APK baixado"
+  else ko "APK pelo GitHub" "$(tail -3 "$T/apk.log" "$T/conv.log" 2>/dev/null | tr '\n' ' ')"; fi
+  kill $FG 2>/dev/null
+  rm -rf "$T"
+fi
 # 5. PPU accuracy against hardware reference images (informative, not pass/fail)
 MB=${MEALYBUG:-$N/../deps/mealybug}; MBE=${MEALYBUG_EXPECTED:-$N/../deps/mealybug-tearoom-tests/expected}
 if [ -d "$MB" ] && [ -d "$MBE" ]; then

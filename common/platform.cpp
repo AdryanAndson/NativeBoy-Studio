@@ -406,6 +406,47 @@ bool launch(const std::string& exe, const std::string& args, const std::string& 
     HINSTANCE h = ShellExecuteW(nullptr, L"open", W(exe).c_str(), W(args).c_str(), W(cwd).c_str(), SW_SHOWNORMAL);
     return (INT_PTR)h > 32;
 }
+bool http_request(const std::string& method, const std::string& url, const std::vector<std::string>& headers,
+                  const std::string& body, HttpResult& res, std::string& err, bool follow) {
+    res = HttpResult();
+    std::string cur = url;
+    for (int hop = 0; hop < 5; hop++) {
+        URL_COMPONENTSW uc; memset(&uc, 0, sizeof uc); uc.dwStructSize = sizeof uc;
+        wchar_t host[256] = {0}, path[4096] = {0};
+        uc.lpszHostName = host; uc.dwHostNameLength = 255; uc.lpszUrlPath = path; uc.dwUrlPathLength = 4095;
+        wchar_t extra[4096] = {0}; uc.lpszExtraInfo = extra; uc.dwExtraInfoLength = 4095;
+        std::wstring wurl = W(cur);
+        if (!InternetCrackUrlW(wurl.c_str(), 0, 0, &uc)) { err = "Endereço inválido: " + cur; return false; }
+        HINTERNET in = InternetOpenW(L"NativeBoyStudio", INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
+        if (!in) { err = "Sem acesso à internet."; return false; }
+        HINTERNET con = InternetConnectW(in, host, uc.nPort, nullptr, nullptr, INTERNET_SERVICE_HTTP, 0, 0);
+        std::wstring target = std::wstring(path) + extra;
+        const bool first = hop == 0;
+        HINTERNET rq = con ? HttpOpenRequestW(con, W(first ? method : std::string("GET")).c_str(), target.c_str(), nullptr, nullptr, nullptr,
+                                              INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_NO_AUTO_REDIRECT | INTERNET_FLAG_NO_COOKIES |
+                                              (uc.nScheme == INTERNET_SCHEME_HTTPS ? INTERNET_FLAG_SECURE : 0), 0) : nullptr;
+        if (!rq) { if (con) InternetCloseHandle(con); InternetCloseHandle(in); err = "Não foi possível conectar a " + cur; return false; }
+        std::wstring hdr;
+        if (first) for (auto& h : headers) hdr += W(h) + L"\r\n";       // (not sent to the site of a redirect)
+        const bool send_body = first && !body.empty();
+        BOOL ok = HttpSendRequestW(rq, hdr.empty() ? nullptr : hdr.c_str(), (DWORD)-1L, send_body ? (LPVOID)body.data() : nullptr, send_body ? (DWORD)body.size() : 0);
+        if (!ok) { InternetCloseHandle(rq); InternetCloseHandle(con); InternetCloseHandle(in); err = "Sem resposta de " + cur + " (sem internet?)"; return false; }
+        DWORD code = 0, len = sizeof code;
+        HttpQueryInfoW(rq, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &code, &len, nullptr);
+        res.status = (int)code;
+        wchar_t loc[4096] = {0}; DWORD ll = sizeof loc;
+        res.location.clear();
+        if (HttpQueryInfoW(rq, HTTP_QUERY_LOCATION, loc, &ll, nullptr)) res.location = U(loc);
+        res.body.clear();
+        char buf[16384]; DWORD n;
+        while (InternetReadFile(rq, buf, sizeof buf, &n) && n) res.body.append(buf, n);
+        InternetCloseHandle(rq); InternetCloseHandle(con); InternetCloseHandle(in);
+        if (follow && code >= 300 && code < 400 && !res.location.empty()) { cur = res.location; continue; }
+        return true;
+    }
+    err = "Redirecionamentos demais em " + url;
+    return false;
+}
 bool http_get(const std::string& url, std::string& body, std::string& err) {
     HINTERNET in = InternetOpenW(L"NativeBoyStudio", INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
     if (!in) { err = "Sem acesso à internet."; return false; }
@@ -417,6 +458,12 @@ bool http_get(const std::string& url, std::string& body, std::string& err) {
     return true;
 }
 #else
+static std::vector<std::string> split_lines_plat(const std::string& t) {
+    std::vector<std::string> out; std::string cur;
+    for (char c : t) { if (c == '\n') { if (!cur.empty() && cur.back() == '\r') cur.pop_back(); out.push_back(cur); cur.clear(); } else cur += c; }
+    if (!cur.empty()) out.push_back(cur);
+    return out;
+}
 static std::string capture(const std::string& cmd) {
     FILE* p = popen((cmd + " 2>/dev/null").c_str(), "r");
     if (!p) return "";
@@ -472,6 +519,40 @@ ProcResult run(const std::string& cmdline, const std::string& cwd, const std::ve
 bool launch(const std::string& exe, const std::string& args, const std::string& cwd) {
     std::string c = "cd " + quote(cwd) + " && setsid " + quote(exe) + " " + args + " >/dev/null 2>&1 &";
     return system(c.c_str()) == 0;
+}
+bool http_request(const std::string& method, const std::string& url, const std::vector<std::string>& headers,
+                  const std::string& body, HttpResult& res, std::string& err, bool follow) {
+    res = HttpResult();
+    // curl: the headers (with the access key) go in a private file, not on the command line where other users could see them
+    char tdir[] = "/tmp/nbhttpXXXXXX";
+    if (!mkdtemp(tdir)) { err = "Não foi possível criar um arquivo temporário."; return false; }
+    const std::string d = tdir, hf = d + "/h", bf = d + "/b", of = d + "/o", lf = d + "/l";
+    std::string hs; for (auto& h : headers) hs += h + "\n";
+    write_text(hf, hs);
+    chmod(hf.c_str(), 0600);
+    write_file(bf, body.data(), body.size());
+    std::string cmd = "curl -sS --max-time 900 -X " + quote(method) + " -H @" + quote(hf) + " -o " + quote(of) + " -D " + quote(lf) + " -w '%{http_code}'";
+    if (!body.empty() || method == "POST" || method == "PUT" || method == "PATCH") cmd += " --data-binary @" + quote(bf);
+    if (follow) cmd += " -L";
+    cmd += " " + quote(url);
+    ProcResult r = run(cmd, "");
+    read_text(of, res.body);
+    std::string hdrs; read_text(lf, hdrs);
+    remove_tree(d);
+    if (r.code != 0) {
+        err = r.code == 127 || r.output.find("not found") != std::string::npos ? "O programa curl não está instalado (sudo apt install curl)." : "Sem resposta de " + url + " (" + r.output.substr(0, 200) + ")";
+        return false;
+    }
+    std::string code = r.output; while (!code.empty() && !isdigit((unsigned char)code.back())) code.pop_back();
+    res.status = atoi(code.substr(code.size() >= 3 ? code.size() - 3 : 0).c_str());
+    for (auto& line : split_lines_plat(hdrs)) {
+        if (line.size() > 9 && (line.compare(0, 9, "location:") == 0 || line.compare(0, 9, "Location:") == 0)) {
+            res.location = line.substr(9);
+            while (!res.location.empty() && (res.location[0] == ' ')) res.location.erase(0, 1);
+            while (!res.location.empty() && (res.location.back() == '\r' || res.location.back() == ' ')) res.location.pop_back();
+        }
+    }
+    return true;
 }
 bool http_get(const std::string& url, std::string& body, std::string& err) {
     ProcResult r = run("curl -fsSL --max-time 20 " + quote(url), "");
