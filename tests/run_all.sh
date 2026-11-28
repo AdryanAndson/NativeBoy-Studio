@@ -10,6 +10,9 @@ set -u
 N=$(cd "$(dirname "$0")/.." && pwd)
 R=${1:-$N/../testroms}
 RGBDS=${2:-$N/../deps/rgbds}
+# absolute paths: several tests run from temporary folders
+[ -d "$R" ] && R=$(cd "$R" && pwd)
+[ -d "$RGBDS" ] && RGBDS=$(cd "$RGBDS" && pwd)
 OUT=$N/tests/RESULTADOS.md
 "$N/build_host.sh" > /tmp/nb_build_host.log 2>&1 || { echo "build failed"; tail -40 /tmp/nb_build_host.log; exit 1; }
 pass=0; fail=0
