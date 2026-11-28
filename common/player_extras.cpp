@@ -544,19 +544,27 @@ void GamePlayer::draw_start_screen(const SDL_Rect& area) {
         dl->AddImageRounded((ImTextureID)(intptr_t)title_icon, i0, ImVec2(i0.x + is, i0.y + is), ImVec2(0, 0), ImVec2(1, 1), IM_COL32_WHITE, 10);
         title_y = area.h * 0.06f + is + 14;
     }
-    // title
-    ImGui::PushFont(nullptr, std::min(64.f, area.h / 9.f) * uis);
-    ImVec2 ts = ImGui::CalcTextSize(game_name.c_str());
-    ImGui::SetCursorPos(ImVec2(cx - ts.x / 2 + 3, title_y + 3));
-    ImGui::TextColored(ImVec4(0, 0, 0, 0.7f), "%s", game_name.c_str());
-    ImGui::SetCursorPos(ImVec2(cx - ts.x / 2, title_y));
-    ImGui::TextUnformatted(game_name.c_str());
-    ImGui::PopFont();
+    // title in pixel letters (on the 8-pixel grid, as large as fits)
+    {
+        float fs = std::max(16.f, std::floor(std::min(48.f * uis, area.h / 10.f) / 8.f) * 8.f);
+        while (fs > 8 && ui::font_pixel->CalcTextSizeA(fs, FLT_MAX, 0, game_name.c_str()).x > area.w * 0.9f) fs -= 8;
+        const ImVec2 ts = ui::font_pixel->CalcTextSizeA(fs, FLT_MAX, 0, game_name.c_str());
+        const ImVec2 tp(area.x + cx - ts.x / 2, area.y + title_y);
+        const ui::Pal& P = ui::pal();
+        // light letters with a dark shadow: readable over any picture of the game
+        dl->AddText(ui::font_pixel, fs, ImVec2(tp.x + fs / 8, tp.y + fs / 8), ui::theme_gb ? P.lcd[0] : IM_COL32(0, 0, 0, 190), game_name.c_str());
+        dl->AddText(ui::font_pixel, fs, tp, ui::theme_gb ? P.lcd[3] : IM_COL32(255, 255, 255, 255), game_name.c_str());
+        ImGui::SetCursorPos(ImVec2(0, title_y + ts.y + 10));
+    }
     std::string sub = play_seconds >= 60 ? "Tempo de jogo: " + play_time_text() : std::string("Pronto para jogar");
     if (!achs.empty()) { int n = 0; for (auto& a : achs) n += a.done; sub += "   |   Conquistas: " + std::to_string(n) + "/" + std::to_string(achs.size()); }
     ImVec2 ss = ImGui::CalcTextSize(sub.c_str());
     ImGui::SetCursorPos(ImVec2(cx - ss.x / 2, ImGui::GetCursorPosY() + 4));
-    ImGui::TextDisabled("%s", sub.c_str());
+    {
+        const ImVec2 sp = ImGui::GetCursorScreenPos();
+        dl->AddRectFilled(ImVec2(sp.x - 10, sp.y - 3), ImVec2(sp.x + ss.x + 10, sp.y + ss.y + 3), IM_COL32(0, 0, 0, 120), 6);
+    }
+    ImGui::TextColored(ImVec4(0.92f, 0.92f, 0.96f, 1), "%s", sub.c_str());
 
     ImGui::SetWindowFontScale(1.25f * uis);
     float y = std::max(ImGui::GetCursorPosY() + 30, area.h * 0.42f);
@@ -585,25 +593,39 @@ void GamePlayer::draw_start_screen(const SDL_Rect& area) {
     start_move = 0;
     int chosen = -1;
     if (start_go) { chosen = items[start_sel].first; start_go = false; }
-    {   // a translucent panel with the colour stripe behind the options
-        const float ph = n * (ImGui::GetFrameHeight() + 12) + 30, px0 = area.x + cx - bw / 2 - 26, py0 = area.y + y - 22;
-        dl->AddRectFilled(ImVec2(px0, py0), ImVec2(px0 + bw + 52, py0 + ph), IM_COL32(18, 12, 40, 190), 18);
-        const float sw = (bw + 52 - 36) / 5;
-        for (int i = 0; i < 5; i++) dl->AddRectFilled(ImVec2(px0 + 18 + i * sw, py0 + 8), ImVec2(px0 + 18 + (i + 1) * sw, py0 + 11), ui::accent(i));
-    }
-    for (int i = 0; i < n; i++) {
-        ImGui::SetCursorPos(ImVec2(cx - bw / 2, y));
-        bool sel = i == start_sel;
-        if (sel) {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.30f, 0.62f, 0.48f, 1));
-            ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(1, 1, 1, 0.9f));
-            ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 2.0f);
+    {   // a small "screen" with the options in pixel letters and the arrow at the chosen one
+        const ui::Pal& P = ui::pal();
+        float fs = std::max(8.f, std::round(16.f * uis / 8.f) * 8.f);
+        float widest = 0;
+        for (auto& it : items) widest = std::max(widest, ui::font_pixel->CalcTextSizeA(fs, FLT_MAX, 0, it.second.c_str()).x);
+        while (fs > 8 && widest + fs * 4 > area.w * 0.9f) { widest *= (fs - 8) / fs; fs -= 8; }
+        const float rh = fs + 18, pw = std::max(bw, widest + fs * 4), ph = n * rh + 28;
+        const ImVec2 a0(area.x + cx - pw / 2, area.y + y - 14), a1(a0.x + pw, a0.y + ph);
+        if (ui::theme_gb) {
+            ui::lcd_frame(dl, ImVec2(a0.x - 10, a0.y - 10), ImVec2(a1.x + 10, a1.y + 10), 10);
+            ui::led(dl, ImVec2(a0.x + 2, a0.y + 6), 3.f, true);
+        } else {
+            dl->AddRectFilled(ImVec2(a0.x + 3, a0.y + 5), ImVec2(a1.x + 3, a1.y + 5), IM_COL32(0, 0, 0, 90), 14);
+            dl->AddRectFilled(a0, a1, (P.card & 0x00FFFFFF) | 0xEE000000, 14);
+            ui::stripe(dl, a0.x + 16, a1.x - 16, a0.y + 6, 3);
         }
-        if (ImGui::Button(items[i].second.c_str(), ImVec2(bw, 0))) chosen = items[i].first;
-        ImVec2 md = ImGui::GetIO().MouseDelta;
-        if (ImGui::IsItemHovered() && (md.x != 0 || md.y != 0)) start_sel = i;
-        if (sel) { ImGui::PopStyleVar(); ImGui::PopStyleColor(2); }
-        y += ImGui::GetFrameHeight() + 12;
+        float ry = a0.y + 16;
+        for (int i = 0; i < n; i++) {
+            const bool sel = i == start_sel;
+            ImGui::SetCursorScreenPos(ImVec2(a0.x + 6, ry));
+            ImGui::PushID(i);
+            if (ImGui::InvisibleButton("op", ImVec2(pw - 12, rh))) chosen = items[i].first;
+            ImVec2 md = ImGui::GetIO().MouseDelta;
+            if (ImGui::IsItemHovered() && (md.x != 0 || md.y != 0)) start_sel = i;
+            ImGui::PopID();
+            if (sel) dl->AddRectFilled(ImVec2(a0.x + 8, ry + 2), ImVec2(a1.x - 8, ry + rh - 2), ui::theme_gb ? P.lcd[2] : (P.shell & 0x00FFFFFF) | 0xCC000000, ui::theme_gb ? 2.f : 8.f);
+            const ImU32 tc = ui::theme_gb ? P.lcd[0] : IM_COL32(255, 255, 255, sel ? 255 : 210);
+            const float ty = ry + (rh - fs) / 2;
+            // the blinking arrow of the old cartridge menus
+            if (sel && (SDL_GetTicks() / 400) % 2 == 0) dl->AddText(ui::font_pixel, fs, ImVec2(a0.x + fs * 0.9f, ty), ui::theme_gb ? P.lcd[0] : ui::accent(3), "\xE2\x96\xB6");
+            dl->AddText(ui::font_pixel, fs, ImVec2(a0.x + fs * 2.6f, ty), tc, items[i].second.c_str());
+            ry += rh;
+        }
     }
     switch (chosen) {
     case I_CONT: load_state(0); start_screen = false; break;
@@ -621,7 +643,11 @@ void GamePlayer::draw_start_screen(const SDL_Rect& area) {
 #endif
     ImVec2 hs = ImGui::CalcTextSize(hint);
     ImGui::SetCursorPos(ImVec2(cx - hs.x / 2, area.h - hs.y - 18));
-    ImGui::TextDisabled("%s", hint);
+    {
+        const ImVec2 hp = ImGui::GetCursorScreenPos();
+        dl->AddRectFilled(ImVec2(hp.x - 12, hp.y - 4), ImVec2(hp.x + hs.x + 12, hp.y + hs.y + 4), IM_COL32(0, 0, 0, 120), 6);
+    }
+    ImGui::TextColored(ImVec4(0.90f, 0.90f, 0.94f, 1), "%s", hint);
     ImGui::End();
 }
 

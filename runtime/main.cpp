@@ -65,26 +65,6 @@ static SDL_HitTestResult console_hit_test(SDL_Window* w, const SDL_Point* p, voi
 
 static bool is_fullscreen(SDL_Window* w) { return (SDL_GetWindowFlags(w) & (SDL_WINDOW_FULLSCREEN | SDL_WINDOW_FULLSCREEN_DESKTOP)) != 0; }
 
-// Windows 10/11: dark title bar, so the window looks like a modern dark app
-static void dark_title_bar(SDL_Window* w) {
-#ifdef _WIN32
-    SDL_SysWMinfo info; SDL_VERSION(&info.version);
-    if (!SDL_GetWindowWMInfo(w, &info)) return;
-    HMODULE dwm = LoadLibraryW(L"dwmapi.dll");
-    if (!dwm) return;
-    typedef HRESULT(WINAPI * SetAttr)(HWND, DWORD, LPCVOID, DWORD);
-    SetAttr set = (SetAttr)(void*)GetProcAddress(dwm, "DwmSetWindowAttribute");
-    if (set) {
-        BOOL on = TRUE;
-        if (set(info.info.win.window, 20, &on, sizeof on) != S_OK) set(info.info.win.window, 19, &on, sizeof on);   // 19 on older Windows 10
-        DWORD caption = 0x00561E2E, text = 0x00FFF0F4;    // Windows 11: purple title bar (COLORREF is 0x00BBGGRR) with light text
-        set(info.info.win.window, 35, &caption, sizeof caption);
-        set(info.info.win.window, 36, &text, sizeof text);
-    }
-#else
-    (void)w;
-#endif
-}
 
 // remembers where the window was (size, position, maximized) for the next time
 static void save_window(SDL_Window* w, GamePlayer& p) {
@@ -237,7 +217,6 @@ int main(int argc, char** argv) {
         }
     }
     SDL_SetWindowMinimumSize(win, 160, 144);
-    dark_title_bar(win);
     if (pre.getb("janela_maximizada", false)) SDL_MaximizeWindow(win);
     if (pre.getb("sempre_no_topo", false)) SDL_SetWindowAlwaysOnTop(win, SDL_TRUE);
     SDL_ShowWindow(win);
@@ -269,6 +248,7 @@ int main(int argc, char** argv) {
     }
     for (auto& kv : pre.kv) if (kv.first == "fidelity" || kv.first == "fullscreen") player.cfg.set(kv.first, kv.second);
     player.apply_settings();
+    player.apply_menu_theme();
     nb_user_init(player.m);
     NB_STEP("jogo iniciado");
     if (player.cfg.getb("fullscreen", false)) set_fullscreen(win, player, true);
@@ -366,6 +346,7 @@ int main(int argc, char** argv) {
         if (want_vsync != cur_vsync) { SDL_RenderSetVSync(ren, want_vsync ? 1 : 0); cur_vsync = want_vsync; }
 
         player.update();
+        if (player.theme_changed) { player.theme_changed = false; ui::title_bar(win); }
         if (!player.paused && !player.menu_open) nb_user_frame(player.m);
 
         ImGui_ImplSDLRenderer2_NewFrame();

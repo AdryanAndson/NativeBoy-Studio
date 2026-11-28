@@ -1,5 +1,6 @@
 #include "analysis.h"
 #include "../core/optable.h"
+#include <map>
 #include "../core/autoplay.h"
 #include "../core/apu.h"
 #include <algorithm>
@@ -84,6 +85,134 @@ std::string hw_register_name(u16 a) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Indirect calls through helper routines (the way most games call code in other banks):
+//   CallHL:  jp hl                                  -> the target is hl
+//   FarCall: [ld a, r] / ld [$2000-$3FFF], a / ... / jp hl | call CallHL | rst (CallHL)
+//                                                    -> the target is hl in the bank held by r (or a)
+// The descent keeps the constants loaded into the registers (and pushed on the stack) inside a block,
+// so "ld a, BANK / ld hl, Func / call FarCall" and "ld de, Func / push de / ret" reveal their targets
+// without playing the game.
+enum HelperKind { HK_NONE = 0, HK_JPHL = 1, HK_FAR = 2 };
+struct Helper { int kind = HK_NONE; int bank_reg = 7; };   // bank_reg: 0..7 = b c d e h l - a
+
+// register written by an opcode (bit mask over b c d e h l - a), or -1 = unknown effect (clear all)
+static int written_regs(const std::vector<u8>& rom, u32 off) {
+    const u8 op = rom[off];
+    auto bit = [](int r) { return r == 6 ? 0 : 1 << r; };
+    if (op >= 0x40 && op <= 0x7F) return op == 0x76 ? 0 : bit((op >> 3) & 7);
+    if ((op & 0xC7) == 0x06 || (op & 0xC7) == 0x04 || (op & 0xC7) == 0x05) return bit((op >> 3) & 7);
+    switch (op) {
+    case 0x01: case 0x03: case 0x0B: case 0xC1: return bit(0) | bit(1);
+    case 0x11: case 0x13: case 0x1B: case 0xD1: return bit(2) | bit(3);
+    case 0x21: case 0x23: case 0x2B: case 0xE1: case 0x09: case 0x19: case 0x29: case 0x39: case 0xF8: return bit(4) | bit(5);
+    case 0x22: case 0x32: return bit(4) | bit(5);
+    case 0x2A: case 0x3A: return bit(4) | bit(5) | bit(7);
+    case 0xF1: return bit(7);
+    case 0x0A: case 0x1A: case 0xF0: case 0xF2: case 0xFA: case 0x07: case 0x0F: case 0x17: case 0x1F: case 0x27: case 0x2F: return bit(7);
+    case 0x00: case 0x02: case 0x12: case 0x08: case 0x31: case 0x33: case 0x3B: case 0x34: case 0x35: case 0x36: case 0x37: case 0x3F:
+    case 0xE0: case 0xE2: case 0xEA: case 0xF3: case 0xFB: case 0xC5: case 0xD5: case 0xE5: case 0xF5: case 0xE8: case 0xF9: case 0xFE: case 0x10:
+        return 0;
+    case 0xCB: {
+        if (off + 1 >= rom.size()) return -1;
+        const u8 c = rom[off + 1];
+        if (c >= 0x40 && c <= 0x7F) return 0;               // bit n, r
+        return bit(c & 7);
+    }
+    default: break;
+    }
+    if (op >= 0x80 && op <= 0xB7) return bit(7);              // add/adc/sub/sbc/and/xor/or (cp does not write)
+    if (op >= 0xB8 && op <= 0xBF) return 0;
+    if (op == 0xC6 || op == 0xCE || op == 0xD6 || op == 0xDE || op == 0xE6 || op == 0xEE || op == 0xF6) return bit(7);
+    return -1;
+}
+
+// A routine that only selects a ROM bank and returns: "ld a, r / ld [$2000], a / ret" (it may also keep
+// the bank in a variable). src = register of the caller holding the bank (0..7 = b c d e h l - a);
+// wmask = registers it changes.
+struct BankSetter { bool ok = false; int src = -1; int wmask = 0; };
+static BankSetter bank_setter(const Analysis& a, u32 off) {
+    BankSetter r;
+    const size_t n = a.rom.size();
+    const u32 bank_end = (off / 0x4000 + 1) * 0x4000;
+    int sym[8] = {0, 1, 2, 3, 4, 5, -1, 7};
+    for (int i = 0; i < 16 && off < n && off < bank_end; i++) {
+        const u8 op = a.rom[off];
+        const OpInfo& oi = op_info(op);
+        const int len = op == 0xCB ? 2 : oi.len;
+        const u16 n16 = len == 3 && off + 2 < n ? (u16)(a.rom[off + 1] | (a.rom[off + 2] << 8)) : 0;
+        if ((oi.kind == OK_RET && op == 0xC9) || oi.kind == OK_RETI) { r.ok = r.src >= 0; return r; }   // (reti: also turns interrupts back on)
+        if (oi.kind != OK_NORMAL && oi.kind != OK_EI && oi.kind != OK_DI) return r;
+        if (op >= 0x40 && op <= 0x7F && op != 0x76 && (op & 7) != 6 && ((op >> 3) & 7) != 6) { sym[(op >> 3) & 7] = sym[op & 7]; r.wmask |= 1 << ((op >> 3) & 7); }
+        else if (op == 0xEA && n16 >= 0x2000 && n16 < 0x4000) r.src = sym[7];
+        else {
+            const int w = written_regs(a.rom, off);
+            if (w < 0) return r;
+            for (int k = 0; k < 8; k++) if (w & (1 << k)) sym[k] = -1;
+            r.wmask |= w;
+        }
+        off += len;
+    }
+    return r;
+}
+
+static Helper classify_helper(const Analysis& a, u32 off, std::map<u32, Helper>& cache, int depth = 0) {
+    auto it = cache.find(off);
+    if (it != cache.end()) return it->second;
+    Helper h;
+    cache[off] = h;                                           // (guards against loops)
+    const size_t n = a.rom.size();
+    if (off >= n) return h;
+    if (a.rom[off] == 0xE9) { h.kind = HK_JPHL; cache[off] = h; return h; }
+    // a far-call routine: symbolic registers (which register of the caller each one holds now), until the
+    // code at hl is jumped to / called with a bank selected from one of the caller's registers
+    int sym[8] = {0, 1, 2, 3, 4, 5, -1, 7};
+    int bank_src = -1;
+    std::vector<std::pair<int, int>> stk;                     // pushed register pairs (symbols)
+    auto hl_intact = [&]() { return sym[4] == 4 && sym[5] == 5; };
+    const u32 bank_end = (off / 0x4000 + 1) * 0x4000;
+    u32 p = off;
+    for (int i = 0; i < 24 && p < n && p < bank_end; i++) {
+        const u8 op = a.rom[p];
+        const OpInfo& oi = op_info(op);
+        const int len = op == 0xCB ? 2 : oi.len;
+        const u16 n16 = len == 3 && p + 2 < n ? (u16)(a.rom[p + 1] | (a.rom[p + 2] << 8)) : 0;
+        if (oi.kind == OK_JP_HL) { if (bank_src >= 0 && hl_intact()) { h.kind = HK_FAR; h.bank_reg = bank_src; } break; }
+        if (oi.kind == OK_CALL || oi.kind == OK_RST || oi.kind == OK_JP) {
+            const u16 t = oi.kind == OK_RST ? (u16)oi.rst : n16;
+            if (t >= 0x4000 || depth >= 2) break;
+            if (a.rom[t] == 0xE9 || classify_helper(a, t, cache, depth + 1).kind == HK_JPHL) {
+                if (bank_src >= 0 && hl_intact()) { h.kind = HK_FAR; h.bank_reg = bank_src; }
+                break;
+            }
+            if (oi.kind == OK_JP) break;
+            const BankSetter bs = bank_setter(a, t);           // "call SetBank": the bank comes from its register
+            if (!bs.ok) break;
+            bank_src = bs.src >= 0 ? sym[bs.src] : -1;
+            for (int k = 0; k < 8; k++) if (bs.wmask & (1 << k)) sym[k] = -1;
+            p += len;
+            continue;
+        }
+        if (oi.kind == OK_RET || oi.kind == OK_RETI || oi.kind == OK_JR || oi.kind == OK_JR_CC || oi.kind == OK_JP_CC || oi.kind == OK_CALL_CC || oi.kind == OK_ILLEGAL) break;
+        if (op >= 0x40 && op <= 0x7F && op != 0x76 && (op & 7) != 6 && ((op >> 3) & 7) != 6) sym[(op >> 3) & 7] = sym[op & 7];
+        else if (op == 0xEA && n16 >= 0x2000 && n16 < 0x4000) bank_src = sym[7];
+        else if (op == 0xC5 || op == 0xD5 || op == 0xE5) { const int r = op == 0xC5 ? 0 : op == 0xD5 ? 2 : 4; stk.push_back({sym[r], sym[r + 1]}); }
+        else if (op == 0xF5) stk.push_back({sym[7], -1});
+        else if (op == 0xC1 || op == 0xD1 || op == 0xE1 || op == 0xF1) {
+            std::pair<int, int> v = {-1, -1};
+            if (!stk.empty()) { v = stk.back(); stk.pop_back(); }
+            if (op == 0xF1) sym[7] = v.first;
+            else { const int r = op == 0xC1 ? 0 : op == 0xD1 ? 2 : 4; sym[r] = v.first; sym[r + 1] = v.second; }
+        } else {
+            const int w = written_regs(a.rom, p);
+            if (w < 0) break;
+            for (int k = 0; k < 8; k++) if (w & (1 << k)) sym[k] = -1;
+        }
+        p += len;
+    }
+    cache[off] = h;
+    return h;
+}
+
 // recursive descent. "no_fall" = call sites followed by data (jump tables), not code.
 static void descend(Analysis& a, const std::vector<u8>* trace, const std::set<u32>& no_fall, const std::set<u32>& more_entries) {
     size_t n = a.rom.size();
@@ -106,11 +235,32 @@ static void descend(Analysis& a, const std::vector<u8>* trace, const std::set<u3
     for (u32 o : a.extra_entries) add(o, AF_JUMP, -1);
     for (u32 o : more_entries) add(o, AF_JUMP, -1);
 
+    std::map<u32, Helper> helpers;
+    int mbc_mask = a.info.mbc == 1 ? 0x1F : a.info.mbc == 2 ? 0x0F : a.info.mbc == 3 ? 0x7F : 0x1FF;
+    // addresses loaded as constants ("ld bc, Handler / call SetHandler"): maybe code kept in a variable
+    std::vector<std::pair<u32, int>> code_ptrs;
+    // a routine that ends in "reti" (it switches banks with interrupts off): the code after the call is
+    // resumed by the dispatcher, so it must be an entry point
+    auto ends_in_reti = [&](u32 t) {
+        const u32 be = (t / 0x4000 + 1) * 0x4000;
+        for (int i = 0; i < 40 && t < n && t < be; i++) {
+            const u8 o2 = a.rom[t];
+            const OpInfo& k = op_info(o2);
+            if (k.kind == OK_RETI) return true;
+            if (k.kind == OK_RET || k.kind == OK_JP || k.kind == OK_JR || k.kind == OK_JP_HL || k.kind == OK_ILLEGAL) return false;
+            t += o2 == 0xCB ? 2 : k.len;
+        }
+        return false;
+    };
+    for (int round = 0; round < 6; round++) {
     while (!work.empty()) {
         Work w = work.front(); work.pop_front();
         u32 off = w.off;
         int known_bank = w.known_bank;
         int last_ld_a = -1;
+        int reg[8]; for (int& r : reg) r = -1;                 // known constants of b c d e h l - a (-1 = unknown)
+        std::vector<int> stack;                                // known words pushed in this block (-1 = unknown)
+        auto hl = [&]() { return reg[4] >= 0 && reg[5] >= 0 ? (reg[4] << 8) | reg[5] : -1; };
         while (off < n && !(a.fl[off] & AF_START)) {
             int bank = Analysis::bank_of(off);
             u16 addr = Analysis::addr_of(off);
@@ -146,24 +296,117 @@ static void descend(Analysis& a, const std::vector<u8>* trace, const std::set<u3
                     else a.unresolved_far.push_back({off, t});
                 }
             };
+            // a call into a helper: CallHL (target = hl) or FarCall (target = hl in the bank of a register)
+            auto via_helper = [&](u16 dest) {
+                if (dest >= 0x4000 && bank == 0) return;
+                const u32 hoff = dest < 0x4000 ? dest : Analysis::off_of(bank, dest);
+                const Helper hp = classify_helper(a, hoff, helpers);
+                const int t = hl();
+                // the callee returns here after an indirect jump: the native code needs an entry point
+                if (hp.kind != HK_NONE && (oi.kind == OK_CALL || oi.kind == OK_CALL_CC || oi.kind == OK_RST)) add(off + len, AF_JUMP, known_bank);
+                if (hp.kind == HK_JPHL && t >= 0) target((u16)t, AF_CALL);
+                else if (hp.kind == HK_FAR && t >= 0) {
+                    const int bv = reg[hp.bank_reg];
+                    if (t < 0x4000) add((u32)t, AF_CALL, -1);
+                    else if (t < 0x8000 && bv >= 0) {
+                        int bk = bv & mbc_mask; if (!bk && a.info.mbc != 5) bk = 1;
+                        if ((size_t)bk * 0x4000 < n) add(Analysis::off_of(bk, (u16)t), AF_CALL, bk);
+                    }
+                }
+            };
             u32 next = off + len;
             bool stop = false;
             switch (oi.kind) {
-            case OK_JP: target(n16, AF_JUMP); stop = true; break;
+            case OK_JP: target(n16, AF_JUMP); via_helper(n16); stop = true; break;
             case OK_JP_CC: target(n16, AF_JUMP); break;
             case OK_JR: target((u16)(addr + 2 + (s8)n8), AF_JUMP); stop = true; break;
             case OK_JR_CC: target((u16)(addr + 2 + (s8)n8), AF_JUMP); break;
-            case OK_CALL: case OK_CALL_CC: target(n16, AF_CALL); if (no_fall.count(off)) stop = true; break;
-            case OK_RST: add(oi.rst, AF_CALL, -1); if (no_fall.count(off)) stop = true; break;
-            case OK_RET: case OK_RETI: stop = true; break;
-            case OK_JP_HL: a.indirect.push_back(off); stop = true; break;
+            case OK_CALL: case OK_CALL_CC:
+                target(n16, AF_CALL); via_helper(n16);
+                if ((n16 < 0x4000 || bank != 0) && ends_in_reti(n16 < 0x4000 ? n16 : Analysis::off_of(bank, n16))) add(off + len, AF_JUMP, known_bank);
+                if (no_fall.count(off)) stop = true;
+                break;
+            case OK_RST: add(oi.rst, AF_CALL, -1); via_helper((u16)oi.rst); if (no_fall.count(off)) stop = true; break;
+            case OK_RET: case OK_RETI:
+                // "ld de, Func / push de / ret": the pushed constant is where it goes
+                // (the words pushed under it are return addresses for later "ret"s)
+                if (op == 0xC9) for (int v : stack) if (v >= 0 && v < 0x8000) target((u16)v, AF_JUMP);
+                stop = true; break;
+            case OK_JP_HL: if (hl() >= 0) target((u16)hl(), AF_JUMP); a.indirect.push_back(off); stop = true; break;
             case OK_ILLEGAL: a.illegal.push_back(off); stop = true; break;
             default: break;
+            }
+            // (an "ld hl" followed by "add hl" indexes a table: data, not a routine)
+            bool indexes = false;
+            if (op == 0x21) for (u32 q = off + 3, k = 0; k < 4 && q < n; k++) { const u8 o2 = a.rom[q]; if (o2 == 0x09 || o2 == 0x19 || o2 == 0x29 || o2 == 0x2A || o2 == 0x7E) { indexes = true; break; } q += o2 == 0xCB ? 2 : op_info(o2).len; }
+            if ((op == 0x01 || op == 0x11 || op == 0x21) && !indexes && n16 >= 0x150 && n16 < 0x8000) {
+                if (n16 < 0x4000) code_ptrs.push_back({n16, -1});
+                else if (bank != 0) code_ptrs.push_back({Analysis::off_of(bank, n16), bank});
+            }
+            // the constants after this instruction
+            if (op == 0x06 || op == 0x0E || op == 0x16 || op == 0x1E || op == 0x26 || op == 0x2E || op == 0x3E) reg[(op >> 3) & 7] = n8;
+            else if (op == 0x01) { reg[0] = n16 >> 8; reg[1] = n16 & 0xFF; }
+            else if (op == 0x11) { reg[2] = n16 >> 8; reg[3] = n16 & 0xFF; }
+            else if (op == 0x21) { reg[4] = n16 >> 8; reg[5] = n16 & 0xFF; }
+            else if (op >= 0x40 && op <= 0x7F && op != 0x76 && (op & 7) != 6 && ((op >> 3) & 7) != 6) reg[(op >> 3) & 7] = reg[op & 7];
+            else if (op == 0xAF) reg[7] = 0;
+            else if (op == 0xC5 || op == 0xD5 || op == 0xE5) {
+                const int r = op == 0xC5 ? 0 : op == 0xD5 ? 2 : 4;
+                stack.push_back(reg[r] >= 0 && reg[r + 1] >= 0 ? (reg[r] << 8) | reg[r + 1] : -1);
+            } else if (op == 0xF5) stack.push_back(-1);
+            else if (op == 0xC1 || op == 0xD1 || op == 0xE1 || op == 0xF1) {
+                const int v = stack.empty() ? -1 : stack.back();
+                if (!stack.empty()) stack.pop_back();
+                if (op == 0xF1) reg[7] = -1;
+                else { const int r = op == 0xC1 ? 0 : op == 0xD1 ? 2 : 4; reg[r] = v >= 0 ? v >> 8 : -1; reg[r + 1] = v >= 0 ? v & 0xFF : -1; }
+            } else if (oi.kind == OK_CALL || oi.kind == OK_CALL_CC || oi.kind == OK_RST) { for (int& r : reg) r = -1; stack.clear(); }
+            else if (op == 0x31 || op == 0xF9 || op == 0xE8 || op == 0x33 || op == 0x3B) stack.clear();
+            else {
+                const int wr = written_regs(a.rom, off);
+                if (wr < 0) { for (int& r : reg) r = -1; stack.clear(); }
+                else for (int r = 0; r < 8; r++) if (wr & (1 << r)) reg[r] = -1;
             }
             if (stop) break;
             off = next;
             if (off < n && (a.fl[off] & AF_START)) break;
         }
+    }
+    // the constants that point right after the end of a known routine (ret / jp / jr / reti) start a
+    // routine of their own: functions follow each other in the ROM. Anything else is taken as data.
+    bool more = false;
+    for (auto& cp : code_ptrs) {
+        const u32 t = cp.first;
+        if (t >= n || (a.fl[t] & (AF_START | AF_BODY)) || t < 1) continue;
+        bool after_end = false;
+        for (int k = 1; k <= 3 && !after_end; k++) {
+            if (t < (u32)k) break;
+            const u32 s0 = t - k;
+            if (!(a.fl[s0] & AF_START) || s0 / 0x4000 != t / 0x4000) continue;
+            const u8 o2 = a.rom[s0];
+            const OpInfo& k2 = op_info(o2);
+            if ((o2 == 0xCB ? 2 : k2.len) != k) continue;
+            after_end = (k2.kind == OK_RET && o2 == 0xC9) || k2.kind == OK_RETI || k2.kind == OK_JP || k2.kind == OK_JR;   // (after "jp hl" there is usually a table)
+        }
+        if (!after_end) continue;
+        // and it must decode cleanly up to its own end
+        bool clean = false;
+        int count = 0, moves = 0;                              // text decodes as "ld r, r" almost only
+        const u32 be = (t / 0x4000 + 1) * 0x4000;
+        u32 q = t;
+        for (int i = 0; i < 400 && q < n && q < be; i++) {
+            const u8 o2 = a.rom[q];
+            const OpInfo& k2 = op_info(o2);
+            const int l2 = o2 == 0xCB ? 2 : k2.len;
+            count++; if (o2 >= 0x40 && o2 <= 0x7F) moves++;
+            if (k2.kind == OK_ILLEGAL || q + l2 > be) break;
+            if (i && (a.fl[q] & AF_BODY) && !(a.fl[q] & AF_START)) break;          // runs into the middle of an instruction
+            if ((k2.kind == OK_RET && o2 == 0xC9) || k2.kind == OK_RETI || k2.kind == OK_JP || k2.kind == OK_JR || k2.kind == OK_JP_HL || (i && (a.fl[q] & AF_START))) { clean = true; break; }
+            q += l2;
+        }
+        if (clean && moves * 2 <= count) { add(t, AF_JUMP, cp.second); more = true; }
+    }
+    code_ptrs.clear();
+    if (!more) break;
     }
 }
 
@@ -243,7 +486,22 @@ void analyze(Analysis& a, const std::vector<u8>* trace, const std::vector<Machin
             u32 head = 0;
             if (jo >= 3 && !memcmp(&a.rom[jo - 3], pa, 4)) head = jo - 3;
             else if (jo >= 5 && (!memcmp(&a.rom[jo - 5], pb, 6) || !memcmp(&a.rom[jo - 5], pc_, 6))) head = jo - 5;
-            else continue;
+            else {
+                // the same, with a few instructions that keep hl between "ld l,a" and "jp hl"
+                // (e.g. "ld a,[hl+] / ld h,[hl] / ld l,a / ld a,[de] / inc de / jp hl")
+                u32 q = jo;
+                for (int g = 0; g < 4 && !head && q > 3; g++) {
+                    u32 prev = 0;
+                    for (int k = 1; k <= 3; k++) if (q >= (u32)k && (a.fl[q - k] & AF_START) && (a.rom[q - k] == 0xCB ? 2 : op_info(a.rom[q - k]).len) == k) { prev = q - k; break; }
+                    if (!prev) break;
+                    if (a.rom[prev] == 0x6F && prev >= 2 && a.rom[prev - 1] == 0x66 && a.rom[prev - 2] == 0x2A) { head = prev - 2; break; }
+                    const int w = written_regs(a.rom, prev);
+                    const OpKind kd = op_info(a.rom[prev]).kind;
+                    if (w < 0 || (w & ((1 << 4) | (1 << 5))) || kd != OK_NORMAL || a.rom[prev] == 0x22 || a.rom[prev] == 0x32) break;
+                    q = prev;
+                }
+                if (!head) continue;
+            }
             // nearest "ld hl, nn" decoded shortly before
             int tbl = -1;
             for (u32 p = head; p + 24 > head && p > 0; p--) {

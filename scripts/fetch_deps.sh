@@ -8,7 +8,7 @@ get() { [ -f "$2" ] || curl -fsSL -o "$2" "$1"; }
 clone() { # url dir commit
   [ -d "$2" ] || { git clone -q "$1" "$2" && git -C "$2" checkout -q "$3"; }
 }
-clone https://github.com/ocornut/imgui.git imgui dbb30112c619990c593ab46f1855ac08d8ff1e52
+clone https://github.com/ocornut/imgui.git imgui 144727fad6ded3055d388dadc4072c9c25ee1891   # docking branch (panels that dock)
 clone https://github.com/nothings/stb.git stb 4e9b368bfc071e97206ea5c6adba68dd0cbf8897
 get https://github.com/libsdl-org/SDL/releases/download/release-2.30.9/SDL2-devel-2.30.9-mingw.tar.gz SDL2-devel-2.30.9-mingw.tar.gz
 [ -d SDL2-2.30.9 ] || tar xzf SDL2-devel-2.30.9-mingw.tar.gz

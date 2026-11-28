@@ -4,7 +4,7 @@ set -e
 cd "$(dirname "$0")"
 N=$(pwd)
 if [ -n "${DEPS:-}" ]; then D=$DEPS; elif [ -d "$N/deps" ]; then D=$N/deps; else D=$(cd "$N/.." && pwd)/deps; fi
-VER=1.17.0
+VER=1.18.0
 OUT=$N/build/linux
 PKG=$N/dist/linux/pkg
 APP=$PKG/opt/nativeboy-studio
@@ -36,6 +36,7 @@ rm -rf "$PKG"; mkdir -p "$APP" "$PKG/DEBIAN" "$PKG/usr/bin" "$PKG/usr/share/appl
 cp "$OUT/NativeBoyStudio" "$APP/"
 mkdir -p "$APP/assets/fonts" "$APP/sdk/core" "$APP/sdk/common" "$APP/sdk/runtime" "$APP/sdk/imgui/backends" "$APP/sdk/stb" "$APP/toolchain/rgbds" "$APP/licencas"
 cp /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf "$APP/assets/fonts/"
+cp data/fonts/*.ttf "$APP/assets/fonts/"; cp data/fonts/OFL-*.txt "$APP/licencas/"
 cp "$N/data/jogos_gb.txt" "$APP/assets/" 2>/dev/null || cp data/jogos_gb.txt "$APP/assets/"
 ICO=$N/build/win/icon.ico
 if [ ! -f "$ICO" ]; then   # (the same icon the Windows build makes)

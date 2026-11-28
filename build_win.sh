@@ -27,8 +27,8 @@ fi
 cat > "$OUT/studio.rc" <<RC
 1 ICON "icon.ico"
 1 VERSIONINFO
-FILEVERSION 1,17,0,0
-PRODUCTVERSION 1,17,0,0
+FILEVERSION 1,18,0,0
+PRODUCTVERSION 1,18,0,0
 BEGIN
   BLOCK "StringFileInfo"
   BEGIN
@@ -36,9 +36,9 @@ BEGIN
     BEGIN
       VALUE "CompanyName", "NativeBoy"
       VALUE "FileDescription", "NativeBoy Studio"
-      VALUE "FileVersion", "1.17.0"
+      VALUE "FileVersion", "1.18.0"
       VALUE "ProductName", "NativeBoy Studio"
-      VALUE "ProductVersion", "1.17.0"
+      VALUE "ProductVersion", "1.18.0"
       VALUE "OriginalFilename", "NativeBoyStudio.exe"
     END
   END
@@ -75,6 +75,7 @@ rm -rf "$STAGE"; mkdir -p "$STAGE"
 cp "$OUT/NativeBoyStudio.exe" "$SDL/bin/SDL2.dll" "$STAGE/"
 mkdir -p "$STAGE/assets/fonts" "$STAGE/sdk"
 cp /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf "$STAGE/assets/fonts/"
+cp data/fonts/*.ttf "$STAGE/assets/fonts/"; mkdir -p "$STAGE/licencas"; cp data/fonts/OFL-*.txt "$STAGE/licencas/"
 cp data/jogos_gb.txt "$STAGE/assets/"
 cp "$OUT/icon.ico" "$STAGE/assets/"
 mkdir -p "$STAGE/sdk/core" "$STAGE/sdk/common" "$STAGE/sdk/runtime" "$STAGE/sdk/imgui/backends" "$STAGE/sdk/stb" \
@@ -90,7 +91,7 @@ cp $D/stb/stb_image.h $D/stb/stb_image_write.h $D/stb/stb_vorbis.c "$STAGE/sdk/s
 cp -r $SDL/include/SDL2 "$STAGE/sdk/SDL2/include/"
 cp $SDL/lib/libSDL2.dll.a "$STAGE/sdk/SDL2/lib/"
 cp $SDL/bin/SDL2.dll "$STAGE/sdk/SDL2/bin/"
-echo "1.17.0-$(cat core/*.cpp core/*.h common/*.cpp common/*.h runtime/*.cpp | md5sum | cut -c1-8)" > "$STAGE/sdk/VERSION"
+echo "1.18.0-$(cat core/*.cpp core/*.h common/*.cpp common/*.h runtime/*.cpp | md5sum | cut -c1-8)" > "$STAGE/sdk/VERSION"
 # toolchain: w64devkit (GCC) without the debugger, Fortran and editor
 mkdir -p "$STAGE/toolchain"
 cp -r $D/w64/w64devkit "$STAGE/toolchain/w64devkit"

@@ -14,6 +14,7 @@
 #include "studio_extras.h"
 #include "toolchain.h"
 #include "imgui.h"
+#include "imgui_internal.h"
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_sdlrenderer2.h"
 #include <SDL.h>
@@ -23,7 +24,7 @@
 #include <map>
 #include <memory>
 
-#define NB_VERSION "1.17.0"
+#define NB_VERSION "1.18.0"
 #ifdef _WIN32
 #define NB_PLAT "Windows x64"
 #define NB_TOOLCHAIN "GCC (w64devkit, incluído)"
@@ -42,7 +43,12 @@ using namespace gb;
 enum Screen { SC_HOME, SC_PLAY, SC_DECOMP, SC_CONVERT, SC_MODIFY, SC_SETTINGS, SC_LIBRARY };
 enum Action { ACT_PLAY, ACT_DECOMP, ACT_CONVERT, ACT_MODIFY };
 
-static const ImVec4 COL_OK(0.35f, 0.85f, 0.55f, 1), COL_WARN(1.0f, 0.78f, 0.30f, 1), COL_ERR(1.0f, 0.42f, 0.38f, 1), COL_INFO(0.6f, 0.75f, 1.0f, 1), COL_DIM(0.6f, 0.62f, 0.66f, 1);
+// text colours from the theme (they must read well on the light grey one too)
+#define COL_OK (ui::pal().ok)
+#define COL_WARN (ui::pal().warn)
+#define COL_ERR (ui::pal().err)
+#define COL_INFO (ui::pal().info)
+#define COL_DIM (ui::pal().dim)
 
 
 // ------------------------------------------------------------------ updates
@@ -191,6 +197,20 @@ struct App {
     int hd_scale = 4;
     char mod_name[64] = "minhas_alteracoes";
 
+    // window model: dockable panels around the work area
+    bool show_proj_panel = true, show_log_panel = true, show_status = true, want_default_layout = false;
+    bool want_about = false, want_shortcuts = false;
+    SDL_Rect play_area = {0, 0, 0, 0};      // where the game is drawn (the work panel, last frame)
+    float ui_scale = 1.0f;                   // "Tamanho da interface" (font size)
+    void draw_menubar();
+    void draw_brandbar(float y, float h);
+    void draw_statusbar(float y, float h);
+    void draw_project_panel();
+    void draw_log_window();
+    void build_default_layout(unsigned dock_id, float w, float h);
+    void handle_shortcuts();
+    void set_theme(const std::string& theme, const std::string& shell);
+    void update_title();
     // settings
     char url_buf[256] = "";
     // Android: APK built on GitHub
@@ -492,7 +512,6 @@ struct App {
     }
 
     void frame();
-    void draw_topbar();
     void draw_home();
     void draw_play(const SDL_Rect& area);
     void draw_decomp();
@@ -510,143 +529,496 @@ static bool big_card(const char* id, const char* title, const char* desc, const 
     bool clicked = ImGui::InvisibleButton("card", size);
     bool hov = ImGui::IsItemHovered();
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    ImU32 bg = ui::theme_retro ? (hov ? IM_COL32(70, 68, 150, 245) : IM_COL32(48, 48, 116, 235))
-             : ui::theme_gbc ? (hov ? IM_COL32(74, 54, 132, 240) : IM_COL32(52, 38, 96, 225)) : (hov ? IM_COL32(40, 46, 56, 255) : IM_COL32(30, 34, 42, 255));
-    dl->AddRectFilled(p, ImVec2(p.x + size.x, p.y + size.y), bg, 12);
-    dl->AddRectFilled(p, ImVec2(p.x + 8, p.y + size.y), ImGui::ColorConvertFloat4ToU32(accent), 12, ImDrawFlags_RoundCornersLeft);
-    if (hov) dl->AddRect(p, ImVec2(p.x + size.x, p.y + size.y), ImGui::ColorConvertFloat4ToU32(accent), 12.0f, 0, 2.0f);
-    float fs = ui::base_size;
-    ImFont* f = ImGui::GetFont();
-    dl->AddText(f, fs * 1.6f, ImVec2(p.x + 28, p.y + 22), IM_COL32(255, 255, 255, 255), title);
-    if (tag && *tag) {
-        ImVec2 ts = f->CalcTextSizeA(fs * 0.85f, FLT_MAX, 0, tag);
-        ImVec2 tp(p.x + size.x - ts.x - 28, p.y + 26);
-        dl->AddRectFilled(ImVec2(tp.x - 8, tp.y - 4), ImVec2(tp.x + ts.x + 8, tp.y + ts.y + 4), ImGui::ColorConvertFloat4ToU32(ImVec4(accent.x * 0.5f, accent.y * 0.5f, accent.z * 0.5f, 1)), 6);
-        dl->AddText(f, fs * 0.85f, tp, IM_COL32(255, 255, 255, 230), tag);
+    const ui::Pal& P = ui::pal();
+    const ImU32 ac = ImGui::ColorConvertFloat4ToU32(accent);
+    const float r = ui::theme_gb ? 6.f : 14.f;
+    if (ui::theme_gb) {
+        // a small screen: dark bezel, green glass, dark-green print
+        dl->AddRectFilled(ImVec2(p.x + 3, p.y + 4), ImVec2(p.x + size.x + 3, p.y + size.y + 4), IM_COL32(0, 0, 0, 40), r);
+        dl->AddRectFilled(p, ImVec2(p.x + size.x, p.y + size.y), IM_COL32(86, 88, 104, 255), r);
+        dl->AddRectFilled(ImVec2(p.x + 8, p.y + 8), ImVec2(p.x + size.x - 8, p.y + size.y - 8), hov ? P.card_hover : P.card, 3);
+        dl->AddRectFilled(ImVec2(p.x + 8, p.y + 8), ImVec2(p.x + 14, p.y + size.y - 8), ac, 2);
+        ui::led(dl, ImVec2(p.x + size.x - 18, p.y + size.y - 18), 4.f, hov);
+    } else {
+        dl->AddRectFilled(ImVec2(p.x + 2, p.y + 5), ImVec2(p.x + size.x + 2, p.y + size.y + 5), IM_COL32(0, 0, 0, 80), r);
+        dl->AddRectFilled(p, ImVec2(p.x + size.x, p.y + size.y), hov ? P.card_hover : P.card, r);
+        dl->AddRectFilled(p, ImVec2(p.x + 10, p.y + size.y), ac, r, ImDrawFlags_RoundCornersLeft);
+        if (hov) dl->AddRect(p, ImVec2(p.x + size.x, p.y + size.y), ac, r, 0, 2.0f);
     }
-    dl->AddText(f, fs, ImVec2(p.x + 28, p.y + 22 + fs * 2.2f), IM_COL32(190, 196, 206, 255), desc, nullptr, size.x - 56);
+    float fs = ui::base_size;
+    const float x0 = p.x + 30;
+    dl->AddText(ui::font_pixel, fs * 1.05f, ImVec2(x0, p.y + 26), P.card_text, title);
+    if (tag && *tag) {
+        ImVec2 ts = ui::font_pixel->CalcTextSizeA(fs * 0.62f, FLT_MAX, 0, tag);
+        ImVec2 tp(p.x + size.x - ts.x - 32, p.y + 26);
+        dl->AddRectFilled(ImVec2(tp.x - 8, tp.y - 6), ImVec2(tp.x + ts.x + 8, tp.y + ts.y + 6), ui::theme_gb ? P.lcd[0] : ac, ui::theme_gb ? 2.f : 8.f);
+        dl->AddText(ui::font_pixel, fs * 0.62f, tp, ui::theme_gb ? P.lcd[3] : IM_COL32(255, 255, 255, 255), tag);
+    }
+    dl->AddText(ui::font_text, fs * 0.95f, ImVec2(x0, p.y + 34 + fs * 1.6f), P.card_dim, desc, nullptr, size.x - 70);
     ImGui::PopID();
     return clicked;
 }
 
-void App::draw_topbar() {
-    ImGuiViewport* vp = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(vp->Pos);
-    ImGui::SetNextWindowSize(ImVec2(vp->Size.x, 52));
-    ImGui::Begin("##top", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus);
-    if (ui::theme_gbc) {
-        // five colour dots before the name and a thin colour stripe under the bar
-        ImDrawList* dl = ImGui::GetWindowDrawList();
-        ImVec2 p = ImGui::GetCursorScreenPos();
-        for (int i = 0; i < 5; i++) dl->AddCircleFilled(ImVec2(p.x + 7 + i * 15.f, p.y + 15), 5.5f, ui::accent(i));
-        const float sw = vp->Size.x / 5;
-        for (int i = 0; i < 5; i++) dl->AddRectFilled(ImVec2(vp->Pos.x + i * sw, vp->Pos.y + 49), ImVec2(vp->Pos.x + (i + 1) * sw, vp->Pos.y + 52), ui::accent(i));
-        ImGui::Dummy(ImVec2(78, 1)); ImGui::SameLine(0, 4);
-    }
-    ui::push_size(1.3f);
-    ImGui::TextColored(ui::theme_gbc ? ImVec4(1, 1, 1, 1) : COL_OK, "NativeBoy");
-    ImGui::SameLine(0, 4);
-    ImGui::Text("Studio");
-    ui::pop_size();
-    ImGui::SameLine(0, 30);
-    bool busy = job.running;
-    ImGui::BeginDisabled(busy);
-    auto tab = [&](const char* label, Screen s, std::function<void()> on) {
-        bool active = screen == s;
-        if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-        else ImGui::PushStyleColor(ImGuiCol_Button, ui::theme_retro ? ImVec4(0.24f, 0.24f, 0.54f, 1) : ui::theme_gbc ? ImVec4(0.235f, 0.175f, 0.42f, 1) : ImVec4(0.16f, 0.18f, 0.22f, 1));
-        if (ImGui::Button(label)) on();
-        ImGui::PopStyleColor();
-        ImGui::SameLine();
-    };
-    tab("Início", SC_HOME, [&] { close_player(); screen = SC_HOME; });
-    tab("Biblioteca", SC_LIBRARY, [&] { close_player(); screen = SC_LIBRARY; });
-    tab("Jogar ROM", SC_PLAY, [&] { go(ACT_PLAY); });
-    tab("Descompilar", SC_DECOMP, [&] { close_player(); go(ACT_DECOMP); });
-    tab("Converter para PC", SC_CONVERT, [&] { close_player(); go(ACT_CONVERT); });
-    tab("Modificar", SC_MODIFY, [&] { close_player(); go(ACT_MODIFY); });
-    tab("Ferramentas", SC_SETTINGS, [&] { close_player(); screen = SC_SETTINGS; });
-    ImGui::EndDisabled();
-    if (proj) {
-        // right-aligned, but never over the tabs: on narrow windows the label goes and the name is shortened
-        const float after_tabs = ImGui::GetCursorPosX() + 16;
-        const std::string tail = proj->info.cgb_supported ? "  (GBC)" : "  (GB)";
-        std::string name = proj->name;
-        const float close_w = ImGui::CalcTextSize("Fechar").x + 40, label_w = ImGui::CalcTextSize("Projeto: ").x;
-        auto width = [&](const std::string& n) { return ImGui::CalcTextSize((n + tail).c_str()).x; };
-        bool label = vp->Size.x - 20 - close_w - width(name) - label_w >= after_tabs;
-        while (!label && name.size() > 4 && vp->Size.x - 20 - close_w - width(name + "...") < after_tabs) {
-            name.pop_back();
-            while (!name.empty() && ((unsigned char)name.back() & 0xC0) == 0x80) name.pop_back();   // (whole UTF-8 characters)
-        }
-        if (name != proj->name) name += "...";
-        const std::string t = name + tail;
-        ImGui::SameLine(std::max(after_tabs, vp->Size.x - 20 - close_w - width(name) - (label ? label_w : 0)));
-        if (label) { ImGui::TextColored(COL_DIM, "Projeto:"); ImGui::SameLine(); }
-        ImGui::Text("%s", t.c_str());
-        if (name != proj->name && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", proj->name.c_str());
-        ImGui::SameLine();
-        ImGui::BeginDisabled(busy);
-        if (ImGui::SmallButton("Fechar")) { close_player(); proj.reset(); screen = SC_HOME; write_session(); }
-        ImGui::EndDisabled();
-    }
-    ImGui::End();
+static const char* step_names[] = {"Importado", "Código descoberto", "Descompilado", "Traduzido para C++", "Compilado", "Verificado", "Exportado"};
+
+void App::set_theme(const std::string& theme, const std::string& shell) {
+    prefs.set("tema", theme); prefs.set("cor_carcaca", shell); prefs.save();
+    ui::apply_theme(theme, shell);
+    ImGui::GetStyle().ScaleAllSizes(ui_scale);
+    ui::title_bar(win);
 }
 
-void App::draw_home() {
+void App::update_title() {
+    std::string t = proj ? proj->name + " - NativeBoy Studio" : std::string("NativeBoy Studio");
+    if (job.running) t = "(" + job.title + ") " + t;
+    static std::string last;
+    if (t != last) { last = t; SDL_SetWindowTitle(win, t.c_str()); }
+}
+
+// keyboard shortcuts of the menus (also work with the menus closed)
+void App::handle_shortcuts() {
+    ImGuiIO& io = ImGui::GetIO();
+    if (io.WantTextInput) return;
+    const bool ctrl = io.KeyCtrl, shift = io.KeyShift;
+    const bool busy = job.running;
+    auto key = [](ImGuiKey k) { return ImGui::IsKeyPressed(k, false); };
+    if (screen == SC_PLAY && !ctrl) { if (key(ImGuiKey_F11)) player->want_fullscreen_toggle = true; return; }   // (the game uses the keyboard)
+    if (ctrl && key(ImGuiKey_O) && !busy) { if (shift) { std::string d = plat::folder_dialog("Selecione a pasta do projeto"); if (!d.empty()) open_project(d); } else if (choose_rom()) ask_action = true; }
+    if (ctrl && key(ImGuiKey_W) && proj && !busy) { close_player(); proj.reset(); screen = SC_HOME; write_session(); }
+    if (ctrl && key(ImGuiKey_Q)) quit = true;
+    if (ctrl && key(ImGuiKey_Comma)) { close_player(); screen = SC_SETTINGS; }
+    if (ctrl && key(ImGuiKey_L)) { close_player(); screen = SC_LIBRARY; }
+    if (ctrl && shift && key(ImGuiKey_E) && proj) plat::open_in_explorer(proj->dir);
+    if (!ctrl && !busy) {
+        if (key(ImGuiKey_F5)) go(ACT_PLAY);
+        if (key(ImGuiKey_F6)) { close_player(); go(ACT_DECOMP); }
+        if (key(ImGuiKey_F7)) { close_player(); go(ACT_CONVERT); }
+        if (key(ImGuiKey_F8)) { close_player(); go(ACT_MODIFY); }
+    }
+    if (key(ImGuiKey_F11)) { bool fs = SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP; SDL_SetWindowFullscreen(win, fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP); }
+    if (key(ImGuiKey_F1)) want_shortcuts = true;
+}
+
+void App::draw_menubar() {
+    if (!ImGui::BeginMainMenuBar()) return;
+    const bool busy = job.running;
+    if (ImGui::BeginMenu("Arquivo")) {
+        if (ImGui::MenuItem("Abrir ROM...", "Ctrl+O", false, !busy)) { if (choose_rom()) ask_action = true; }
+        if (ImGui::MenuItem("Abrir projeto...", "Ctrl+Shift+O", false, !busy)) { std::string d = plat::folder_dialog("Selecione a pasta do projeto"); if (!d.empty()) open_project(d); }
+        if (ImGui::BeginMenu("Projetos recentes", !busy)) {
+            auto rec = recent();
+            int n = 0;
+            for (auto& r : rec) {
+                if (!plat::dir_exists(r)) continue;
+                Settings st; st.load(plat::join(r, "projeto.ini"));
+                const int k = std::max(0, std::min(6, st.geti("etapa", 0)));
+                if (ImGui::MenuItem((st.get("nome", plat::file_name(r)) + "##" + r).c_str(), step_names[k])) open_project(r);
+                n++;
+            }
+            if (!n) ImGui::MenuItem("(nenhum)", nullptr, false, false);
+            ImGui::EndMenu();
+        }
+        ImGui::Separator();
+        if (ImGui::MenuItem("Abrir pasta do projeto", "Ctrl+Shift+E", false, proj != nullptr)) plat::open_in_explorer(proj->dir);
+        if (ImGui::MenuItem("Abrir pasta Meus Jogos")) { plat::make_dirs(games_root()); plat::open_in_explorer(games_root()); }
+        if (ImGui::MenuItem("Fechar projeto", "Ctrl+W", false, proj && !busy)) { close_player(); proj.reset(); screen = SC_HOME; write_session(); }
+        ImGui::Separator();
+        if (ImGui::MenuItem("Sair", "Ctrl+Q")) quit = true;
+        ImGui::EndMenu();
+    }
+    if (ImGui::BeginMenu("Jogo")) {
+        if (ImGui::MenuItem("Jogar ROM (emulação)", "F5", screen == SC_PLAY, !busy)) go(ACT_PLAY);
+        if (ImGui::MenuItem("Descompilar", "F6", screen == SC_DECOMP, !busy)) { close_player(); go(ACT_DECOMP); }
+        if (ImGui::MenuItem("Converter para PC nativo", "F7", screen == SC_CONVERT, !busy)) { close_player(); go(ACT_CONVERT); }
+        if (ImGui::MenuItem("Modificar", "F8", screen == SC_MODIFY, !busy)) { close_player(); go(ACT_MODIFY); }
+        ImGui::Separator();
+        const bool exe = proj && plat::file_exists(proj->exe_path());
+        if (ImGui::MenuItem("Rodar o executável nativo", nullptr, false, exe)) plat::launch(proj->exe_path(), "", plat::parent(proj->exe_path()));
+        if (ImGui::MenuItem("Biblioteca de jogos", "Ctrl+L", screen == SC_LIBRARY)) { close_player(); screen = SC_LIBRARY; }
+        ImGui::EndMenu();
+    }
+    if (ImGui::BeginMenu("Exibir")) {
+        ImGui::MenuItem("Painel do projeto", nullptr, &show_proj_panel);
+        ImGui::MenuItem("Registro de atividades", nullptr, &show_log_panel);
+        ImGui::MenuItem("Barra de status", nullptr, &show_status);
+        if (ImGui::MenuItem("Restaurar a disposição dos painéis")) want_default_layout = true;
+        ImGui::Separator();
+        if (ImGui::BeginMenu("Tema")) {
+            const std::string cur = prefs.get("tema", "gbc"), shell = prefs.get("cor_carcaca", "uva");
+            if (ImGui::MenuItem(ui::theme_names[0], nullptr, cur == "gb")) set_theme("gb", shell);
+            ImGui::SeparatorText("GB Color");
+            int ns = 0; const ui::Shell* sh = ui::shells(&ns);
+            for (int i = 0; i < ns; i++) {
+                ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(sh[i].color | 0xFF000000));
+                ImGui::Bullet();
+                ImGui::PopStyleColor();
+                ImGui::SameLine();
+                if (ImGui::MenuItem(sh[i].name, nullptr, cur == "gbc" && shell == sh[i].id)) set_theme("gbc", sh[i].id);
+            }
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Tamanho da interface")) {
+            static const float sizes[] = {0.85f, 1.0f, 1.15f, 1.3f, 1.5f};
+            static const char* names[] = {"Pequeno", "Normal", "Grande", "Maior", "Enorme"};
+            for (int i = 0; i < 5; i++) if (ImGui::MenuItem(names[i], nullptr, std::fabs(ui_scale - sizes[i]) < 0.01f)) {
+                ui_scale = sizes[i];
+                prefs.set("tamanho_interface", std::to_string((int)(ui_scale * 100))); prefs.save();
+                ImGui::GetStyle().FontScaleMain = ui_scale;
+                set_theme(prefs.get("tema", "gbc"), prefs.get("cor_carcaca", "uva"));
+            }
+            ImGui::EndMenu();
+        }
+        ImGui::Separator();
+        bool fs = SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP;
+        if (ImGui::MenuItem("Tela cheia", "F11", fs)) SDL_SetWindowFullscreen(win, fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
+        ImGui::EndMenu();
+    }
+    if (ImGui::BeginMenu("Ferramentas")) {
+        if (ImGui::MenuItem("Preferências e ferramentas", "Ctrl+,", screen == SC_SETTINGS)) { close_player(); screen = SC_SETTINGS; }
+        if (ImGui::MenuItem("Pasta de dados do Studio")) plat::open_in_explorer(user_dir);
+        ImGui::EndMenu();
+    }
+    if (ImGui::BeginMenu("Ajuda")) {
+        if (ImGui::MenuItem("Atalhos de teclado", "F1")) want_shortcuts = true;
+        if (ImGui::MenuItem("Página do projeto no GitHub")) plat::open_url("https://github.com/" NB_UPDATE_REPO);
+        ImGui::Separator();
+        if (ImGui::MenuItem("Sobre o NativeBoy Studio")) want_about = true;
+        ImGui::EndMenu();
+    }
+    // the work in progress, at the right of the menus (like the progress of a native program)
+    if (job.running) {
+        float pr; { std::lock_guard<std::mutex> lk(job.mu); pr = job.progress; }
+        const float w = 220;
+        ImGui::SameLine(ImGui::GetWindowWidth() - w - 16);
+        char lb[16]; snprintf(lb, sizeof lb, "%d%%", (int)(pr * 100));
+        ImGui::ProgressBar(pr, ImVec2(w, ImGui::GetTextLineHeight() + 2), lb);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", job.title.c_str());
+    }
+    ImGui::EndMainMenuBar();
+}
+
+// brand and the work modes (like the cartridge slots of the studio)
+void App::draw_brandbar(float y, float h) {
     ImGuiViewport* vp = ImGui::GetMainViewport();
-    float W = vp->Size.x - 28;
-    ui::push_size(2.0f);
-    ImGui::Text("O que você quer fazer?");
-    ui::pop_size();
-    ImGui::TextColored(COL_DIM, "Escolha uma opção ou arraste uma ROM .gb / .gbc para esta janela.");
-    ImGui::Spacing();
-    float cw = (W - 20) / 2, ch = 150;
-    if (big_card("play", "JOGAR ROM", "Roda o jogo original no ambiente de compatibilidade integrado. Isto é EMULAÇÃO: cada instrução é interpretada em tempo real. Jogar também ajuda a descobrir código para a conversão.", "EMULAÇÃO", ImVec4(0.85f, 0.55f, 0.15f, 1), ImVec2(cw, ch))) go(ACT_PLAY);
-    ImGui::SameLine(0, 20);
-    if (big_card("dec", "DESCOMPILAR ROM", "Analisa o jogo: identifica código, funções, gráficos e músicas e gera um projeto editável (assembly RGBDS que remonta a ROM idêntica, folhas de tiles, capturas VGM).", "ANÁLISE", ImVec4(0.35f, 0.55f, 0.95f, 1), ImVec2(cw, ch))) go(ACT_DECOMP);
-    if (big_card("conv", "CONVERTER PARA PC NATIVO", "Tradução estática SM83 -> C++ e compilação de um executável " NB_PLAT ". Sem interpretar instruções quando a tradução está completa; a verificação compara tudo com o original.", "NATIVO x64", ImVec4(0.25f, 0.75f, 0.50f, 1), ImVec2(cw, ch))) go(ACT_CONVERT);
-    ImGui::SameLine(0, 20);
-    if (big_card("mod", "MODIFICAR JOGO", "Editor visual: redesenhe gráficos, troque paletas, crie pacotes HD, cheats, mods e ganchos C++ para novas funções. Depois gere uma versão modernizada.", "EDITOR", ImVec4(0.75f, 0.40f, 0.85f, 1), ImVec2(cw, ch))) go(ACT_MODIFY);
-    ImGui::Spacing(); ImGui::Spacing();
-    ImGui::BeginChild("bottom", ImVec2(0, 0), ImGuiChildFlags_None);
-    ImGui::Columns(2, nullptr, false);
-    ImGui::SeparatorText("Projetos recentes");
-    auto rec = recent();
-    if (rec.empty()) ImGui::TextColored(COL_DIM, "Nenhum projeto ainda. Abra uma ROM para começar.");
-    for (auto& r : rec) {
-        if (!plat::dir_exists(r)) continue;
-        Settings s; s.load(plat::join(r, "projeto.ini"));
-        static const char* steps[] = {"importado", "código descoberto", "descompilado", "traduzido", "compilado", "verificado", "exportado"};
-        int st = std::max(0, std::min(6, s.geti("etapa", 0)));
-        std::string label = s.get("nome", plat::file_name(r)) + "   -   " + steps[st] + "##" + r;
-        if (ImGui::Selectable(label.c_str())) { open_project(r); }
+    const ui::Pal& P = ui::pal();
+    ImGui::SetNextWindowPos(ImVec2(vp->Pos.x, y));
+    ImGui::SetNextWindowSize(ImVec2(vp->Size.x, h));
+    ImGui::SetNextWindowViewport(vp->ID);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImGui::ColorConvertU32ToFloat4(ui::theme_gb ? P.shell : (P.shell_dark & 0x00FFFFFF) | 0xF0000000));
+    ImGui::Begin("##marca", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                                    ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoScrollWithMouse);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const float x = vp->Pos.x;
+    // power light + name in pixel letters
+    ui::led(dl, ImVec2(x + 22, y + h / 2), 5.f, true);
+    ImGui::SetCursorScreenPos(ImVec2(x + 40, y + h / 2 - ui::base_size * 0.62f));
+    ui::push_pixel(1.15f);
+    const ImU32 name_col = ui::theme_gb ? P.print : IM_COL32(255, 255, 255, 255);
+    ImVec2 np = ImGui::GetCursorScreenPos();
+    dl->AddText(ImVec2(np.x + 2, np.y + 2), ui::theme_gb ? IM_COL32(255, 255, 255, 120) : IM_COL32(0, 0, 0, 120), "NATIVEBOY");
+    ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(name_col), "NATIVEBOY");
+    ImGui::PopFont();
+    ImGui::SameLine(0, 8);
+    ui::push_head(1.0f);
+    ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, y + h / 2 - ImGui::GetTextLineHeight() / 2 - 1));
+    ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(ui::theme_gb ? P.key_a : ui::accent(3)), "Studio");
+    ui::pop_font();
+    // work modes
+    ImGui::SameLine(0, 30);
+    const bool busy = job.running;
+    ImGui::BeginDisabled(busy);
+    auto mode = [&](const char* label, Screen sc, std::function<void()> on, int k) {
+        const bool active = screen == sc;
+        ui::push_head(0.95f);
+        ImVec2 ts = ImGui::CalcTextSize(label);
+        ImVec2 sz(ts.x + 26, h - 18);
+        ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, y + 9));
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        ImGui::PushID(label);
+        if (ImGui::InvisibleButton("m", sz)) on();
+        const bool hov = ImGui::IsItemHovered();
+        ImGui::PopID();
+        ImU32 bg = 0, fg = name_col;
+        if (ui::theme_gb) {
+            if (active) { bg = P.lcd[3]; fg = P.lcd[0]; } else if (hov) { bg = P.shell_light; }
+            if (bg) dl->AddRectFilled(p, ImVec2(p.x + sz.x, p.y + sz.y), bg, 3);
+            if (active) dl->AddRect(p, ImVec2(p.x + sz.x, p.y + sz.y), P.lcd[1], 3.f, 0, 2.f);
+        } else {
+            if (active) bg = ui::accent(k); else if (hov) bg = IM_COL32(255, 255, 255, 28);
+            if (bg) dl->AddRectFilled(p, ImVec2(p.x + sz.x, p.y + sz.y), bg, 10);
+            if (!active) dl->AddRectFilled(ImVec2(p.x + 10, p.y + sz.y - 4), ImVec2(p.x + sz.x - 10, p.y + sz.y - 2), (ui::accent(k) & 0x00FFFFFF) | 0x90000000, 1);
+            fg = IM_COL32(255, 255, 255, active ? 255 : 220);
+        }
+        dl->AddText(ImVec2(p.x + 13, p.y + (sz.y - ts.y) / 2), fg, label);
+        ui::pop_font();
+        ImGui::SameLine(0, 6);
+    };
+    mode("INÍCIO", SC_HOME, [&] { close_player(); screen = SC_HOME; }, 4);
+    mode("BIBLIOTECA", SC_LIBRARY, [&] { close_player(); screen = SC_LIBRARY; }, 3);
+    mode("JOGAR", SC_PLAY, [&] { go(ACT_PLAY); }, 0);
+    mode("DESCOMPILAR", SC_DECOMP, [&] { close_player(); go(ACT_DECOMP); }, 4);
+    mode("CONVERTER", SC_CONVERT, [&] { close_player(); go(ACT_CONVERT); }, 2);
+    mode("MODIFICAR", SC_MODIFY, [&] { close_player(); go(ACT_MODIFY); }, 1);
+    mode("FERRAMENTAS", SC_SETTINGS, [&] { close_player(); screen = SC_SETTINGS; }, 3);
+    ImGui::EndDisabled();
+    // the cartridge of the open project, at the right
+    if (proj) {
+        const float after = ImGui::GetCursorScreenPos().x + 10;
+        std::string name = proj->name;
+        const float cw = 26, max_w = vp->Pos.x + vp->Size.x - 20 - after - cw - 12;
+        while (name.size() > 4 && ImGui::CalcTextSize((name + "...").c_str()).x > max_w) { name.pop_back(); while (!name.empty() && ((unsigned char)name.back() & 0xC0) == 0x80) name.pop_back(); }
+        if (name != proj->name) name += "...";
+        const float tw = ImGui::CalcTextSize(name.c_str()).x;
+        if (max_w > 40) {
+            const float cx = vp->Pos.x + vp->Size.x - 20 - tw - cw - 12;
+            // cartridge: grey for GB games, the theme colour for GBC ones
+            const ImU32 cc = proj->info.cgb_supported ? ui::accent(proj->info.cgb_only ? 0 : 4) : IM_COL32(160, 158, 170, 255);
+            const float cy = y + h / 2 - 15;
+            dl->AddRectFilled(ImVec2(cx, cy), ImVec2(cx + cw, cy + 30), cc, 3);
+            dl->AddRectFilled(ImVec2(cx + cw - 6, cy), ImVec2(cx + cw, cy + 6), ui::theme_gb ? P.shell : P.shell_dark);
+            dl->AddRectFilled(ImVec2(cx + 4, cy + 8), ImVec2(cx + cw - 4, cy + 22), IM_COL32(240, 236, 220, 255), 2);
+            dl->AddRectFilled(ImVec2(cx + 6, cy + 10), ImVec2(cx + cw - 6, cy + 14), cc);
+            ImGui::SetCursorScreenPos(ImVec2(cx + cw + 10, y + h / 2 - ImGui::GetTextLineHeight() / 2));
+            ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(name_col), "%s", name.c_str());
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s\n%s - %s\n%s", proj->name.c_str(), proj->info.cgb_only ? "Somente GB Color" : proj->info.cgb_supported ? "GB + GB Color" : "GB",
+                                                          proj->info.mbc_name.c_str(), step_names[std::max(0, std::min(6, proj->step()))]);
+        }
     }
-    if (ImGui::Button("Abrir ROM...")) choose_rom();
+    ui::stripe(dl, vp->Pos.x, vp->Pos.x + vp->Size.x, y + h - (ui::theme_gb ? 8 : 3), ui::theme_gb ? 3.f : 3.f);
+    ImGui::End();
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar(2);
+}
+
+void App::draw_statusbar(float y, float h) {
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    const ui::Pal& P = ui::pal();
+    ImGui::SetNextWindowPos(ImVec2(vp->Pos.x, y));
+    ImGui::SetNextWindowSize(ImVec2(vp->Size.x, h));
+    ImGui::SetNextWindowViewport(vp->ID);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12, 3));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImGui::GetStyleColorVec4(ImGuiCol_MenuBarBg));
+    ImGui::Begin("##status", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                                     ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoScrollWithMouse);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    ImGui::SetCursorPosY((h - ImGui::GetTextLineHeight()) / 2);
+    const ImVec2 lp = ImGui::GetCursorScreenPos();
+    ui::led(dl, ImVec2(lp.x + 5, lp.y + ImGui::GetTextLineHeight() / 2), 3.5f, true);
+    ImGui::Dummy(ImVec2(12, 1)); ImGui::SameLine();
+    if (job.running) {
+        float pr; std::string stage;
+        { std::lock_guard<std::mutex> lk(job.mu); pr = job.progress; stage = job.stage; }
+        ImGui::Text("%s", job.title.c_str());
+        ImGui::SameLine();
+        ImGui::ProgressBar(pr, ImVec2(180, ImGui::GetTextLineHeight()), stage.c_str());
+    } else if (proj) {
+        ImGui::Text("%s", proj->name.c_str());
+        ImGui::SameLine(); ImGui::TextColored(COL_DIM, "|"); ImGui::SameLine();
+        ImGui::Text("%s", step_names[std::max(0, std::min(6, proj->step()))]);
+        if (proj->verify.ran) {
+            const double tot = (double)proj->verify.native_entries + proj->verify.fb_rom + proj->verify.fb_ram;
+            ImGui::SameLine(); ImGui::TextColored(COL_DIM, "|"); ImGui::SameLine();
+            ImGui::TextColored(proj->verify.fb_rom + proj->verify.fb_ram == 0 ? COL_OK : COL_WARN, "Nativo: %.1f%%", tot > 0 ? 100.0 * proj->verify.native_entries / tot : 0.0);
+        }
+    } else ImGui::TextColored(COL_DIM, "Pronto. Abra uma ROM (Ctrl+O) ou arraste uma para a janela.");
+    // right side: compiler and version
+    char right[160];
+    snprintf(right, sizeof right, "%s   %s   v%s", tc.ok ? "Compilador pronto" : "Compilador indisponível", ui::theme_gb ? "GB" : "GB Color", NB_VERSION);
+    const float rw = ImGui::CalcTextSize(right).x;
+    ImGui::SameLine(std::max(ImGui::GetCursorPosX() + 20, vp->Size.x - rw - 16));
+    ImGui::TextColored(tc.ok ? COL_DIM : COL_ERR, "%s", right);
+    (void)P;
+    ImGui::End();
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar(3);
+}
+
+// left panel: the open project as a cartridge, its steps and how much of it runs natively
+void App::draw_project_panel() {
+    const ui::Pal& P = ui::pal();
+    if (!proj) {
+        ui::section("SEM PROJETO");
+        ImGui::TextWrapped("Abra uma ROM .gb / .gbc (Ctrl+O) ou arraste uma para a janela.");
+        if (ImGui::Button("Abrir ROM...", ImVec2(-1, 0)) && choose_rom()) ask_action = true;
+        ui::section("RECENTES");
+        int n = 0;
+        for (auto& r : recent()) {
+            if (!plat::dir_exists(r)) continue;
+            Settings st; st.load(plat::join(r, "projeto.ini"));
+            const int k = std::max(0, std::min(6, st.geti("etapa", 0)));
+            if (ImGui::Selectable((st.get("nome", plat::file_name(r)) + "##" + r).c_str())) open_project(r);
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s\n%s", r.c_str(), step_names[k]);
+            n++;
+        }
+        if (!n) ImGui::TextColored(COL_DIM, "Nenhum projeto ainda.");
+        return;
+    }
+    // cartridge with the game name on its label
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const float W = std::min(ImGui::GetContentRegionAvail().x, 230.f);
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float ch = W * 0.62f;
+    const ImU32 body = proj->info.cgb_supported ? ui::accent(proj->info.cgb_only ? 0 : 4) : IM_COL32(168, 166, 176, 255);
+    dl->AddRectFilled(ImVec2(p.x + 3, p.y + 4), ImVec2(p.x + W + 3, p.y + ch + 4), IM_COL32(0, 0, 0, 50), 6);
+    dl->AddRectFilled(p, ImVec2(p.x + W, p.y + ch), body, 6);
+    dl->AddRectFilled(ImVec2(p.x + W - 22, p.y), ImVec2(p.x + W, p.y + 18), ImGui::GetColorU32(ImGuiCol_WindowBg));
+    for (int i = 0; i < 4; i++) dl->AddRectFilled(ImVec2(p.x + 12 + i * 10, p.y + 6), ImVec2(p.x + 18 + i * 10, p.y + 9), IM_COL32(0, 0, 0, 50));
+    const ImVec2 la(p.x + 14, p.y + 18), lb(p.x + W - 14, p.y + ch - 12);
+    dl->AddRectFilled(la, lb, IM_COL32(242, 238, 224, 255), 4);
+    dl->AddRectFilled(ImVec2(la.x, la.y), ImVec2(lb.x, la.y + 10), body, 4, ImDrawFlags_RoundCornersTop);
+    std::string nm = proj->name;
+    dl->PushClipRect(ImVec2(la.x + 6, la.y), ImVec2(lb.x - 6, lb.y), true);
+    dl->AddText(ui::font_head, ui::base_size * 1.15f, ImVec2(la.x + 8, la.y + 16), IM_COL32(40, 36, 60, 255), nm.c_str(), nullptr, lb.x - la.x - 16);
+    dl->AddText(ui::font_pixel, ui::base_size * 0.5f, ImVec2(la.x + 8, lb.y - 16), IM_COL32(90, 86, 110, 255), proj->info.cgb_only ? "GB COLOR" : proj->info.cgb_supported ? "GB / GB COLOR" : "GB");
+    dl->PopClipRect();
+    ImGui::Dummy(ImVec2(W, ch + 8));
+    ImGui::TextColored(COL_DIM, "%s | %d KB | %s", proj->info.mbc_name.c_str(), (int)(proj->rom.size() / 1024), proj->info.has_battery ? "com save" : "sem save");
+    // steps of the conversion
+    ui::section("ETAPAS");
+    const int st = proj->step();
+    for (int i = 0; i < 7; i++) {
+        const bool done = st >= i;
+        ImVec2 q = ImGui::GetCursorScreenPos();
+        const float lh = ImGui::GetTextLineHeight();
+        ImU32 dot = done ? (ui::theme_gb ? P.lcd[1] : ui::accent(2)) : ImGui::GetColorU32(ImGuiCol_FrameBg);
+        dl->AddRectFilled(ImVec2(q.x, q.y + lh * 0.2f), ImVec2(q.x + lh * 0.6f, q.y + lh * 0.8f), dot, ui::theme_gb ? 1.f : 4.f);
+        if (i < 6) dl->AddLine(ImVec2(q.x + lh * 0.3f, q.y + lh * 0.8f), ImVec2(q.x + lh * 0.3f, q.y + lh + ImGui::GetStyle().ItemSpacing.y * 0.6f + lh * 0.2f), dot, 2);
+        ImGui::Dummy(ImVec2(lh * 0.6f, lh * 0.85f)); ImGui::SameLine();
+        if (done) ImGui::TextUnformatted(step_names[i]); else ImGui::TextColored(COL_DIM, "%s", step_names[i]);
+    }
+    // how much runs natively (verification)
+    ui::section("NATIVIDADE");
+    if (proj->verify.ran) {
+        const double tot = (double)proj->verify.native_entries + proj->verify.fb_rom + proj->verify.fb_ram;
+        const float f = tot > 0 ? (float)(proj->verify.native_entries / tot) : 0.f;
+        // eight-segment bar like a battery
+        const ImVec2 b = ImGui::GetCursorScreenPos();
+        const float bw = ImGui::GetContentRegionAvail().x - 8, seg = bw / 10;
+        for (int i = 0; i < 10; i++) {
+            const bool on = f * 10 >= i + 0.5f;
+            dl->AddRectFilled(ImVec2(b.x + i * seg, b.y), ImVec2(b.x + (i + 1) * seg - 3, b.y + 14),
+                              on ? (ui::theme_gb ? P.lcd[1] : ui::accent(f > 0.999f ? 2 : 3)) : ImGui::GetColorU32(ImGuiCol_FrameBg), 2);
+        }
+        ImGui::Dummy(ImVec2(bw, 18));
+        ImGui::Text("%.2f%% nativo", f * 100);
+        if (proj->verify.fb_rom + proj->verify.fb_ram)
+            ImGui::TextColored(COL_DIM, "%s chamadas caíram na emulação", fmt_num((long long)(proj->verify.fb_rom + proj->verify.fb_ram)).c_str());
+        else ImGui::TextColored(COL_OK, "Tudo roda em código nativo");
+        ImGui::TextColored(proj->verify.identical ? COL_OK : COL_WARN, proj->verify.identical ? "Idêntico ao original" : "Diferente do original");
+    } else ImGui::TextColored(COL_DIM, "Converta (F7) para medir.");
+    ui::section("AÇÕES");
+    const bool busy = job.running;
+    ImGui::BeginDisabled(busy);
+    const float bw2 = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) / 2;
+    if (ImGui::Button("Jogar", ImVec2(bw2, 0))) go(ACT_PLAY);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("F5");
     ImGui::SameLine();
-    if (ImGui::Button("Abrir projeto existente...")) {
-        std::string d = plat::folder_dialog("Selecione a pasta do projeto");
-        if (!d.empty()) open_project(d);
+    if (ImGui::Button("Converter", ImVec2(bw2, 0))) { close_player(); go(ACT_CONVERT); }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("F7");
+    if (ImGui::Button("Descompilar", ImVec2(bw2, 0))) { close_player(); go(ACT_DECOMP); }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("F6");
+    ImGui::SameLine();
+    if (ImGui::Button("Modificar", ImVec2(bw2, 0))) { close_player(); go(ACT_MODIFY); }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("F8");
+    ImGui::EndDisabled();
+    if (ImGui::Button("Abrir pasta do projeto", ImVec2(-1, 0))) plat::open_in_explorer(proj->dir);
+    if (plat::file_exists(proj->exe_path()) && ImGui::Button("Rodar o executável nativo", ImVec2(-1, 0))) plat::launch(proj->exe_path(), "", plat::parent(proj->exe_path()));
+}
+
+void App::draw_log_window() {
+    std::vector<std::string> lines;
+    float prog; std::string stage;
+    { std::lock_guard<std::mutex> lk(job.mu); lines = job.lines; prog = job.progress; stage = job.stage; }
+    if (job.running) {
+        ImGui::Text("%s", job.title.c_str());
+        ImGui::ProgressBar(prog, ImVec2(-120, 0), stage.c_str());
+        ImGui::SameLine();
+        if (ImGui::Button("Cancelar")) job.cancel = true;
+    } else if (!lines.empty()) {
+        ImGui::TextColored(job.ok ? COL_OK : COL_ERR, "%s: %s", job.title.c_str(), job.ok ? "concluído" : "não concluído");
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Copiar")) { std::string all; for (auto& l : lines) all += l + "\n"; ImGui::SetClipboardText(all.c_str()); }
+    } else ImGui::TextColored(COL_DIM, "Nenhuma tarefa ainda. Conversões, compilações e exportações aparecem aqui.");
+    ImGui::BeginChild("linhas", ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_HorizontalScrollbar);
+    for (auto& l : lines) {
+        if (l.rfind("ERRO", 0) == 0) ImGui::TextColored(COL_ERR, "%s", l.c_str());
+        else if (l.rfind("==", 0) == 0) ImGui::TextColored(COL_INFO, "%s", l.c_str());
+        else ImGui::TextUnformatted(l.c_str());
     }
-    ImGui::NextColumn();
-    ImGui::SeparatorText("Ambiente");
-    if (tc.ok) { ImGui::TextColored(COL_OK, "Compilador integrado pronto"); ImGui::TextColored(COL_DIM, "%s", tc.version.c_str()); }
-    else { ImGui::TextColored(COL_ERR, "Compilador indisponível"); ImGui::TextWrapped("%s", tc.problem.c_str()); }
-    ImGui::TextColored(COL_DIM, "Projetos: %s", projects_root().c_str());
-    ImGui::TextColored(COL_DIM, "Jogos exportados: %s", games_root().c_str());
-    ImGui::TextColored(COL_DIM, "Versão %s", NB_VERSION);
-    if (job.running) { float pr; { std::lock_guard<std::mutex> lk(job.mu); pr = job.progress; } ImGui::Text("%s", job.title.c_str()); ImGui::ProgressBar(pr, ImVec2(-1, 0)); }
-    ImGui::Columns(1);
+    if (job.running) ImGui::SetScrollHereY(1.0f);
     ImGui::EndChild();
 }
 
-void App::draw_play(const SDL_Rect& area) {
+void App::build_default_layout(unsigned id, float w, float h) {
+    ImGui::DockBuilderRemoveNode(id);
+    ImGui::DockBuilderAddNode(id, ImGuiDockNodeFlags_DockSpace);
+    ImGui::DockBuilderSetNodeSize(id, ImVec2(w, h));
+    ImGuiID center = id, left = 0, bottom = 0;
+    left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, std::min(0.24f, 300.f / std::max(w, 1.f)), nullptr, &center);
+    bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.22f, nullptr, &center);
+    ImGui::DockBuilderDockWindow("Projeto###painel_projeto", left);
+    ImGui::DockBuilderDockWindow("Registro de atividades###painel_registro", bottom);
+    ImGui::DockBuilderDockWindow("Área de trabalho###area", center);
+    ImGui::DockBuilderFinish(id);
+}
+
+void App::draw_home() {
+    const float W = ImGui::GetContentRegionAvail().x;
+    ui::title("O QUE VAMOS FAZER?", 1.6f);
+    ImGui::TextColored(COL_DIM, "Escolha uma opção ou arraste uma ROM .gb / .gbc para esta janela.");
+    ImGui::Spacing();
+    const float gap = 18;
+    const bool two = W > 760;
+    const float cw = two ? (W - gap) / 2 : W, ch = 150;
+    auto next = [&](bool right) { if (two && right) ImGui::SameLine(0, gap); };
+    if (big_card("play", "JOGAR ROM", "Roda o jogo original no ambiente de compatibilidade integrado. Isto é EMULAÇÃO: cada instrução é interpretada em tempo real. Jogar também ajuda a descobrir código para a conversão.", "EMULAÇÃO", ImGui::ColorConvertU32ToFloat4(ui::accent(3)), ImVec2(cw, ch))) go(ACT_PLAY);
+    next(true);
+    if (big_card("dec", "DESCOMPILAR", "Analisa o jogo: identifica código, funções, gráficos e músicas e gera um projeto editável (assembly RGBDS que remonta a ROM idêntica, folhas de tiles, capturas VGM).", "ANÁLISE", ImGui::ColorConvertU32ToFloat4(ui::accent(4)), ImVec2(cw, ch))) { close_player(); go(ACT_DECOMP); }
+    if (big_card("conv", "CONVERTER", "Tradução estática SM83 -> C++ e compilação de um executável " NB_PLAT " nativo. Sem interpretar instruções quando a tradução está completa; a verificação compara tudo com o original.", "NATIVO", ImGui::ColorConvertU32ToFloat4(ui::accent(2)), ImVec2(cw, ch))) { close_player(); go(ACT_CONVERT); }
+    next(true);
+    if (big_card("mod", "MODIFICAR", "Editor visual: redesenhe gráficos, troque paletas, crie pacotes HD, cheats, mods e ganchos C++ para novas funções. Depois gere uma versão modernizada.", "EDITOR", ImGui::ColorConvertU32ToFloat4(ui::accent(1)), ImVec2(cw, ch))) { close_player(); go(ACT_MODIFY); }
+    ImGui::Spacing();
+    // below: shortcuts and the environment, side by side
+    if (ImGui::BeginTable("##inicio_info", two ? 2 : 1, ImGuiTableFlags_SizingStretchSame)) {
+        ImGui::TableNextColumn();
+        ui::section("ATALHOS");
+        static const char* sc[][2] = {{"Ctrl+O", "Abrir ROM"}, {"F5", "Jogar (emulação)"}, {"F6", "Descompilar"}, {"F7", "Converter para PC nativo"},
+                                      {"F8", "Modificar"}, {"Ctrl+L", "Biblioteca"}, {"F11", "Tela cheia"}, {"F1", "Todos os atalhos"}};
+        for (auto& k : sc) {
+            ui::push_head(1.0f);
+            ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(ui::theme_gb ? ui::accent(0) : ui::accent(3)), "%s", k[0]);
+            ui::pop_font();
+            ImGui::SameLine(110);
+            ImGui::TextUnformatted(k[1]);
+        }
+        if (!show_proj_panel) {
+            ui::section("RECENTES");
+            for (auto& r : recent()) {
+                if (!plat::dir_exists(r)) continue;
+                Settings st; st.load(plat::join(r, "projeto.ini"));
+                if (ImGui::Selectable((st.get("nome", plat::file_name(r)) + "##" + r).c_str())) open_project(r);
+            }
+        }
+        ImGui::TableNextColumn();
+        ui::section("AMBIENTE");
+        if (tc.ok) { ImGui::TextColored(COL_OK, "Compilador integrado pronto"); ImGui::TextColored(COL_DIM, "%s", tc.version.c_str()); }
+        else { ImGui::TextColored(COL_ERR, "Compilador indisponível"); ImGui::TextWrapped("%s", tc.problem.c_str()); }
+        ImGui::TextColored(COL_DIM, "Projetos: %s", projects_root().c_str());
+        ImGui::TextColored(COL_DIM, "Jogos exportados: %s", games_root().c_str());
+        ImGui::TextColored(COL_DIM, "Versão %s", NB_VERSION);
+        ImGui::EndTable();
+    }
+}
+
+void App::draw_play(const SDL_Rect&) {
     if (!player) { screen = SC_HOME; return; }
-    ImGuiViewport* vp = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(ImVec2(vp->Pos.x, vp->Pos.y + 52));
-    ImGui::SetNextWindowSize(ImVec2(vp->Size.x, 52));
-    ImGui::Begin("##playbar", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
-    ui::badge("MODO EMULAÇÃO - interpretador SM83 (não é o executável nativo)", IM_COL32(170, 110, 20, 255));
+    // toolbar of the work panel; the game is drawn in the rest of the panel
+    ui::badge("EMULAÇÃO", IM_COL32(170, 110, 20, 255));
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Interpretador SM83: aqui o jogo original é emulado.\nO executável convertido (F7) roda em código nativo.");
     ImGui::SameLine();
     if (ImGui::Button(player->paused ? "Continuar" : "Pausar")) player->paused = !player->paused;
     ImGui::SameLine();
@@ -654,23 +1026,25 @@ void App::draw_play(const SDL_Rect& area) {
     ImGui::SameLine();
     if (ImGui::Button("Reiniciar")) player->reset();
     ImGui::SameLine();
-    if (!vgm_recording) { if (ImGui::Button("Gravar música (VGM)")) { player->m.apu->start_vgm(); vgm_recording = true; notify("Gravando a música... clique em Parar para salvar."); } }
-    else { ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.15f, 0.15f, 1)); if (ImGui::Button("Parar gravação")) stop_vgm(); ImGui::PopStyleColor(); }
+    if (!vgm_recording) { if (ImGui::Button("Gravar música")) { player->m.apu->start_vgm(); vgm_recording = true; notify("Gravando a música... clique em Parar para salvar."); } }
+    else { ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.15f, 0.15f, 1)); ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1)); if (ImGui::Button("Parar gravação")) stop_vgm(); ImGui::PopStyleColor(2); }
     ImGui::SameLine();
     if (ImGui::Button(show_dbg ? "Fechar depurador" : "Depurador")) show_dbg = !show_dbg;
     ImGui::SameLine();
-    if (dumping) ImGui::TextColored(COL_INFO, "Coletando tiles para HD: %zu", dumper.tiles.size());
+    if (dumping) ImGui::TextColored(COL_INFO, "Tiles para HD: %zu", dumper.tiles.size());
     else {
         int n = 0; for (u8 v : play_trace) n += v;
-        ImGui::TextColored(COL_DIM, "Código descoberto nesta sessão: %s instr.", fmt_num(n).c_str());
+        ImGui::TextColored(COL_DIM, "Código descoberto: %s instr.", fmt_num(n).c_str());
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Cada trecho do jogo que você alcança jogando é registrado\npara o conversor traduzir em código nativo.");
     }
-    ImGui::SameLine(vp->Size.x - 90);
-    if (ImGui::Button("Fechar")) { close_player(); screen = SC_HOME; ImGui::End(); return; }
-    ImGui::End();
-    player->draw_menu(area);
-    player->draw_overlay(area);
-    if (show_dbg) draw_debugger(*player, &show_dbg);
-    if (player->want_quit) { close_player(); screen = SC_HOME; }
+    const float cw = ImGui::CalcTextSize("Fechar").x + ImGui::GetStyle().FramePadding.x * 2;
+    ImGui::SameLine(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - cw));
+    if (ImGui::Button("Fechar")) { close_player(); screen = SC_HOME; return; }
+    // the game: the rest of the panel (in window pixels, for the SDL renderer)
+    ImVec2 p = ImGui::GetCursorScreenPos(), av = ImGui::GetContentRegionAvail();
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    play_area = {(int)(p.x - vp->Pos.x), (int)(p.y - vp->Pos.y), std::max(1, (int)av.x), std::max(1, (int)av.y)};
+    ImGui::Dummy(av);
 }
 
 void App::draw_job_panel(float height) {
@@ -716,7 +1090,8 @@ void App::draw_report(const Report& r) {
     ImGui::Unindent(18);
     float y1 = ImGui::GetCursorScreenPos().y;
     dl->ChannelsSetCurrent(0);
-    dl->AddRectFilled(p, ImVec2(p.x + w, y1), ImGui::ColorConvertFloat4ToU32(ImVec4(c.x * 0.25f, c.y * 0.25f, c.z * 0.25f, 1)), 10);
+    const ImVec4 bg = ui::theme_gb ? ImVec4(0.86f + c.x * 0.12f, 0.86f + c.y * 0.12f, 0.86f + c.z * 0.12f, 1) : ImVec4(c.x * 0.25f, c.y * 0.25f, c.z * 0.25f, 1);
+    dl->AddRectFilled(p, ImVec2(p.x + w, y1), ImGui::ColorConvertFloat4ToU32(bg), ui::theme_gb ? 4.f : 10.f);
     dl->AddRectFilled(p, ImVec2(p.x + 6, y1), ImGui::ColorConvertFloat4ToU32(c), 10, ImDrawFlags_RoundCornersLeft);
     dl->ChannelsMerge();
     ImGui::Spacing();
@@ -731,7 +1106,7 @@ void App::draw_report(const Report& r) {
 
 void App::draw_decomp() {
     if (!proj) { screen = SC_HOME; return; }
-    ui::push_size(1.5f); ImGui::Text("Descompilar ROM"); ui::pop_size();
+    ui::title("DESCOMPILAR", 1.4f);
     ImGui::SameLine(); ImGui::TextColored(COL_DIM, "  %s - %s", proj->name.c_str(), proj->info.mbc_name.c_str());
     if (job.running) { draw_job_panel(0); return; }
     if (!proj->an_valid) {
@@ -745,7 +1120,7 @@ void App::draw_decomp() {
         draw_job_panel(0);
         return;
     }
-    if (ImGui::BeginTabBar("dec")) {
+    if (ImGui::BeginTabBar("dec", ImGuiTabBarFlags_FittingPolicyScroll | ImGuiTabBarFlags_TabListPopupButton)) {
         if (tab_item("Resumo")) {
             const RomInfo& ri = proj->info;
             ImGui::Columns(2, nullptr, false);
@@ -902,7 +1277,7 @@ void App::draw_decomp() {
 
 void App::draw_convert() {
     if (!proj) { screen = SC_HOME; return; }
-    ui::push_size(1.5f); ImGui::Text("Converter para PC nativo"); ui::pop_size();
+    ui::title("CONVERTER PARA PC", 1.4f);
     ImGui::SameLine(); ImGui::TextColored(COL_DIM, "  %s", proj->name.c_str());
     bool busy = job.running;
     int st = proj->step();
@@ -1053,11 +1428,11 @@ void App::draw_modify() {
         plat::read_text(proj->path("mods/ganchos.txt"), hooks_list);
         texts_loaded = true;
     }
-    ui::push_size(1.5f); ImGui::Text("Modificar jogo"); ui::pop_size();
+    ui::title("MODIFICAR JOGO", 1.4f);
     ImGui::SameLine(); ImGui::TextColored(COL_DIM, "  %s%s", proj->name.c_str(), proj->rom_modified() ? "  (ROM de trabalho modificada)" : "");
     if (job.running) { draw_job_panel(0); return; }
     int nb = (int)(ed_rom.size() / 0x4000);
-    if (ImGui::BeginTabBar("mod")) {
+    if (ImGui::BeginTabBar("mod", ImGuiTabBarFlags_FittingPolicyScroll | ImGuiTabBarFlags_TabListPopupButton)) {
         if (tab_item("Assistente")) { draw_mod_assistant(*proj, studio_msg(), g_goto_tab); ImGui::EndTabItem(); }
         if (tab_item("Editor de sprites")) { draw_sprite_editor(*proj, studio_msg()); ImGui::EndTabItem(); }
         if (tab_item("Gráficos (tiles)")) {
@@ -1550,7 +1925,7 @@ void App::draw_modify() {
             ImGui::EndTabItem();
         }
         if (tab_item("Código-fonte (assembly)")) {
-            ImGui::TextWrapped("A desmontagem em desmontagem\\ é um projeto RGBDS completo. Edite os arquivos .asm em qualquer editor e clique abaixo para montar uma nova ROM de trabalho com o RGBDS incluído.");
+            ImGui::TextWrapped("A desmontagem em desmontagem/ é um projeto RGBDS completo. Edite os arquivos .asm em qualquer editor e clique abaixo para montar uma nova ROM de trabalho com o RGBDS incluído.");
             if (ImGui::Button("Abrir pasta da desmontagem")) plat::open_in_explorer(proj->path("desmontagem"));
             ImGui::SameLine();
             if (ImGui::Button("Montar ROM a partir da desmontagem")) {
@@ -1599,15 +1974,66 @@ void App::draw_modify() {
 }
 
 void App::draw_settings() {
-    ui::push_size(1.5f); ImGui::Text("Ferramentas e configurações"); ui::pop_size();
-    if (ImGui::BeginTabBar("set")) {
+    ui::title("FERRAMENTAS", 1.4f);
+    if (ImGui::BeginTabBar("set", ImGuiTabBarFlags_FittingPolicyScroll | ImGuiTabBarFlags_TabListPopupButton)) {
         if (tab_item("Geral")) {
             {
-                static const char* tid[] = {"retro", "gbc", "classico"};
-                static const char* tn[] = {"Portátil retrô (padrão)", "Roxo translúcido", "Escuro clássico (verde)"};
-                int ti = 0; for (int i = 0; i < 3; i++) if (prefs.get("tema", "retro") == tid[i]) ti = i;
-                ImGui::SetNextItemWidth(300);
-                if (ImGui::Combo("Aparência do Studio", &ti, tn, 3)) { prefs.set("tema", tid[ti]); prefs.save(); ui::apply_style(false, tid[ti]); }
+                // theme picker: the two handhelds, and the shell colours of the colour one
+                ui::section("APARÊNCIA");
+                const std::string cur = prefs.get("tema", "gbc"), shell = prefs.get("cor_carcaca", "uva");
+                ImDrawList* dl = ImGui::GetWindowDrawList();
+                auto handheld = [&](const char* id, const char* label, ImU32 body, bool sel) {
+                    ImGui::PushID(id);
+                    const ImVec2 p = ImGui::GetCursorScreenPos();
+                    const ImVec2 sz(110, 160);
+                    const bool click = ImGui::InvisibleButton("h", ImVec2(sz.x, sz.y + 26));
+                    const bool hov = ImGui::IsItemHovered();
+                    dl->AddRectFilled(ImVec2(p.x + 3, p.y + 4), ImVec2(p.x + sz.x + 3, p.y + sz.y + 4), IM_COL32(0, 0, 0, 50), 10);
+                    dl->AddRectFilled(p, ImVec2(p.x + sz.x, p.y + sz.y), body, 10);
+                    dl->AddRectFilled(ImVec2(p.x + sz.x - 26, p.y + sz.y - 30), ImVec2(p.x + sz.x, p.y + sz.y), body, 30, ImDrawFlags_RoundCornersBottomRight);
+                    dl->AddRectFilled(ImVec2(p.x + 12, p.y + 12), ImVec2(p.x + sz.x - 12, p.y + 82), IM_COL32(80, 82, 98, 255), 6);
+                    dl->AddRectFilled(ImVec2(p.x + 24, p.y + 20), ImVec2(p.x + sz.x - 24, p.y + 74), strcmp(id, "gb") ? IM_COL32(200, 214, 176, 255) : ui::pal().lcd[3], 2);
+                    dl->AddRectFilled(ImVec2(p.x + 18, p.y + 104), ImVec2(p.x + 46, p.y + 112), IM_COL32(40, 40, 50, 255), 2);
+                    dl->AddRectFilled(ImVec2(p.x + 28, p.y + 94), ImVec2(p.x + 36, p.y + 122), IM_COL32(40, 40, 50, 255), 2);
+                    dl->AddCircleFilled(ImVec2(p.x + 76, p.y + 112), 7, strcmp(id, "gb") ? IM_COL32(50, 46, 70, 255) : IM_COL32(156, 38, 89, 255));
+                    dl->AddCircleFilled(ImVec2(p.x + 94, p.y + 104), 7, strcmp(id, "gb") ? IM_COL32(50, 46, 70, 255) : IM_COL32(156, 38, 89, 255));
+                    if (sel || hov) dl->AddRect(ImVec2(p.x - 4, p.y - 4), ImVec2(p.x + sz.x + 4, p.y + sz.y + 4), sel ? ui::accent(3) : IM_COL32(255, 255, 255, 90), 12, 0, sel ? 3.f : 1.5f);
+                    const ImVec2 ts = ImGui::CalcTextSize(label);
+                    dl->AddText(ImVec2(p.x + (sz.x - ts.x) / 2, p.y + sz.y + 6), ImGui::GetColorU32(ImGuiCol_Text), label);
+                    ImGui::PopID();
+                    return click;
+                };
+                int ns = 0; const ui::Shell* sh = ui::shells(&ns);
+                ImU32 gbc_body = sh[0].color; for (int i = 0; i < ns; i++) if (shell == sh[i].id) gbc_body = sh[i].color;
+                if (handheld("gb", "GB clássico", IM_COL32(200, 196, 190, 255), cur == "gb")) set_theme("gb", shell);
+                ImGui::SameLine(0, 28);
+                if (handheld("gbc", "GB Color", gbc_body, cur != "gb")) set_theme("gbc", shell);
+                ImGui::SameLine(0, 28);
+                ImGui::BeginGroup();
+                ImGui::TextColored(COL_DIM, "Cor da carcaça (GB Color):");
+                for (int i = 0; i < ns; i++) {
+                    ImGui::PushID(i);
+                    const ImVec2 p = ImGui::GetCursorScreenPos();
+                    if (ImGui::InvisibleButton("c", ImVec2(34, 34))) set_theme("gbc", sh[i].id);
+                    const bool hov = ImGui::IsItemHovered();
+                    if (hov) ImGui::SetTooltip("%s", sh[i].name);
+                    dl->AddCircleFilled(ImVec2(p.x + 17, p.y + 17), 14, sh[i].color);
+                    if (!strcmp(sh[i].id, "atomico")) dl->AddCircleFilled(ImVec2(p.x + 13, p.y + 13), 5, IM_COL32(255, 255, 255, 90));
+                    if (cur != "gb" && shell == sh[i].id) dl->AddCircle(ImVec2(p.x + 17, p.y + 17), 17, ui::accent(3), 0, 3);
+                    else if (hov) dl->AddCircle(ImVec2(p.x + 17, p.y + 17), 17, IM_COL32(255, 255, 255, 120), 0, 1.5f);
+                    ImGui::PopID();
+                    if (i % 3 != 2) ImGui::SameLine();
+                }
+                ImGui::Spacing();
+                ImGui::SetNextItemWidth(180);
+                int us = (int)std::lround(ui_scale * 100);
+                if (ImGui::SliderInt("Tamanho da interface", &us, 80, 160, "%d%%", ImGuiSliderFlags_AlwaysClamp)) {
+                    ui_scale = us / 100.f;
+                    ImGui::GetStyle().FontScaleMain = ui_scale;
+                }
+                if (ImGui::IsItemDeactivatedAfterEdit()) { prefs.set("tamanho_interface", std::to_string(us)); prefs.save(); set_theme(cur == "gb" ? "gb" : "gbc", shell); }
+                ImGui::EndGroup();
+                ui::section("PASTAS");
             }
             ImGui::Text("Pasta de projetos: %s", projects_root().c_str());
             ImGui::SameLine(); if (ImGui::SmallButton("Alterar##p")) { std::string d = plat::folder_dialog("Pasta de projetos"); if (!d.empty()) { prefs.set("pasta_projetos", d); prefs.save(); } }
@@ -1685,6 +2111,47 @@ void App::draw_settings() {
 }
 
 void App::draw_dialogs() {
+    // ---- Ajuda > Atalhos de teclado (F1)
+    if (want_shortcuts) { ImGui::OpenPopup("Atalhos de teclado"); want_shortcuts = false; }
+    if (ImGui::BeginPopupModal("Atalhos de teclado", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        static const char* rows[][2] = {
+            {"Ctrl+O", "Abrir ROM"}, {"Ctrl+Shift+O", "Abrir projeto"}, {"Ctrl+W", "Fechar projeto"}, {"Ctrl+Shift+E", "Abrir pasta do projeto"},
+            {"F5", "Jogar (emulação)"}, {"F6", "Descompilar"}, {"F7", "Converter para PC nativo"}, {"F8", "Modificar"},
+            {"Ctrl+L", "Biblioteca"}, {"Ctrl+,", "Ferramentas e preferências"}, {"F11", "Tela cheia"}, {"Ctrl+Q", "Sair"},
+            {"Esc (jogando)", "Menu do jogo"}, {"F9 (depurador)", "Pausar / continuar"}, {"Arrastar arquivo", "Abrir ROM, projeto, patch .ips ou lista .txt"}};
+        if (ImGui::BeginTable("##atalhos", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH)) {
+            for (auto& r : rows) {
+                ImGui::TableNextColumn();
+                ui::push_head(1.0f);
+                ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(ui::theme_gb ? ui::accent(0) : ui::accent(3)), "%s", r[0]);
+                ui::pop_font();
+                ImGui::TableNextColumn();
+                ImGui::TextUnformatted(r[1]);
+            }
+            ImGui::EndTable();
+        }
+        ImGui::TextColored(COL_DIM, "Exibir > Restaurar a disposição dos painéis volta os painéis ao lugar original.");
+        if (ImGui::Button("Fechar", ImVec2(-1, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+    // ---- Ajuda > Sobre
+    if (want_about) { ImGui::OpenPopup("Sobre o NativeBoy Studio"); want_about = false; }
+    if (ImGui::BeginPopupModal("Sobre o NativeBoy Studio", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        ui::lcd_frame(dl, p, ImVec2(p.x + 420, p.y + 110), 8);
+        dl->AddText(ui::font_pixel, 24, ImVec2(p.x + 40, p.y + 30), ui::pal().lcd[0], "NATIVEBOY");
+        dl->AddText(ui::font_pixel, 16, ImVec2(p.x + 40, p.y + 64), ui::pal().lcd[1], "STUDIO " NB_VERSION);
+        ImGui::Dummy(ImVec2(420, 118));
+        ImGui::TextWrapped("Converte jogos de GB e GB Color em programas nativos para Windows e Linux,\ncom emulação, descompilação e modificações.");
+        ImGui::TextColored(COL_DIM, "Interface: Dear ImGui (MIT) e SDL2 (zlib).");
+        ImGui::TextColored(COL_DIM, "Fontes: Press Start 2P e Pixelify Sans (SIL Open Font License), DejaVu Sans.");
+        ImGui::TextColored(COL_DIM, "Dados de jogos: CC BY-SA 4.0 (veja a pasta licencas).");
+        if (ImGui::Button("Abrir a pasta de licenças")) plat::open_in_explorer(plat::join(app_dir, "licencas"));
+        ImGui::SameLine();
+        if (ImGui::Button("Fechar") || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
     if (show_err) { ImGui::OpenPopup("Ops##err"); show_err = false; }
     ImGui::SetNextWindowSize(ImVec2(640, 0), ImGuiCond_Appearing);
     if (ImGui::BeginPopupModal("Ops##err", nullptr, ImGuiWindowFlags_NoSavedSettings)) {
@@ -1777,47 +2244,86 @@ void App::frame() {
     ImGui_ImplSDLRenderer2_NewFrame();
     ImGui_ImplSDL2_NewFrame();
     ImGui::NewFrame();
-    draw_topbar();
+    handle_shortcuts();
+    update_title();
+    draw_menubar();
     ImGuiViewport* vp = ImGui::GetMainViewport();
-    SDL_Rect area = {0, 104, (int)vp->Size.x, (int)vp->Size.y - 104};
-    if (screen == SC_PLAY) draw_play(area);
-    else {
-        ImGui::SetNextWindowPos(ImVec2(vp->Pos.x, vp->Pos.y + 52));
-        ImGui::SetNextWindowSize(ImVec2(vp->Size.x, vp->Size.y - 52));
-        ImGui::Begin("##main", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus);
-        switch (screen) {
-        case SC_HOME: draw_home(); break;
-        case SC_DECOMP: draw_decomp(); break;
-        case SC_CONVERT: draw_convert(); break;
-        case SC_MODIFY: draw_modify(); break;
-        case SC_SETTINGS: draw_settings(); break;
-        case SC_LIBRARY: draw_library(games_root(), studio_msg()); break;
-        default: break;
-        }
+    const float mb = ImGui::GetFrameHeight();
+    const float bh = std::round(ui::base_size * ui_scale * 2.9f);
+    const float sh = show_status ? std::round(ImGui::GetFrameHeight() + 4) : 0.f;
+    draw_brandbar(vp->Pos.y + mb, bh);
+    if (show_status) draw_statusbar(vp->Pos.y + vp->Size.y - sh, sh);
+    // the docking area between the bars
+    const float top = mb + bh;
+    ImGui::SetNextWindowPos(ImVec2(vp->Pos.x, vp->Pos.y + top));
+    ImGui::SetNextWindowSize(ImVec2(vp->Size.x, vp->Size.y - top - sh));
+    ImGui::SetNextWindowViewport(vp->ID);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6, 6));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+    ImGui::Begin("##doca", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoBringToFrontOnFocus |
+                                    ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoSavedSettings);
+    ImGui::PopStyleVar(3);
+    const ImGuiID dock = ImGui::GetID("doca_principal");
+    if (want_default_layout || !ImGui::DockBuilderGetNode(dock)) {
+        build_default_layout(dock, vp->Size.x, vp->Size.y - top - sh);
+        if (want_default_layout) { show_proj_panel = show_log_panel = true; }
+        want_default_layout = false;
+    }
+    ImGui::DockSpace(dock, ImVec2(0, 0), ImGuiDockNodeFlags_None);
+    ImGui::End();
+    // side panels
+    if (show_proj_panel) {
+        if (ImGui::Begin("Projeto###painel_projeto", &show_proj_panel)) draw_project_panel();
         ImGui::End();
     }
+    if (show_log_panel) {
+        if (ImGui::Begin("Registro de atividades###painel_registro", &show_log_panel)) draw_log_window();
+        ImGui::End();
+    }
+    // the work area (title = the current mode)
+    static const char* work_title[] = {"Início", "Jogando (emulação)", "Descompilar", "Converter para PC nativo", "Modificar", "Ferramentas e preferências", "Biblioteca"};
+    const std::string wt = std::string(work_title[screen]) + "###area";
+    const bool playing = screen == SC_PLAY && player;
+    if (playing) ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0));
+    ImGui::Begin(wt.c_str(), nullptr, ImGuiWindowFlags_NoCollapse | (playing ? ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse : 0));
+    if (playing) ImGui::PopStyleColor();
+    switch (screen) {
+    case SC_HOME: draw_home(); break;
+    case SC_PLAY: draw_play(play_area); break;
+    case SC_DECOMP: draw_decomp(); break;
+    case SC_CONVERT: draw_convert(); break;
+    case SC_MODIFY: draw_modify(); break;
+    case SC_SETTINGS: draw_settings(); break;
+    case SC_LIBRARY: draw_library(games_root(), studio_msg()); break;
+    default: break;
+    }
+    ImGui::End();
+    if (playing && player) { player->draw_menu(play_area); player->draw_overlay(play_area); }
+    if (playing && show_dbg && player) draw_debugger(*player, &show_dbg);
+    if (player && player->want_quit) { close_player(); screen = SC_HOME; }
+    SDL_Rect area = play_area;
     draw_dialogs();
     ImGui::Render();
     SDL_SetRenderDrawColor(ren, 14, 15, 18, 255);
     SDL_RenderClear(ren);
-    if (ui::theme_retro) {
-        // indigo backdrop with a faint dot-matrix grid, like an old handheld screen up close
+    {
+        // backdrop: the shell of the handheld (GB: plain grey plastic with a fine texture;
+        // GBC: the shell colour fading into the night)
         int ww = 0, wh = 0; SDL_GetRendererOutputSize(ren, &ww, &wh);
-        SDL_Vertex v[4] = {{{0, 0}, {66, 64, 150, 255}, {0, 0}}, {{(float)ww, 0}, {50, 48, 124, 255}, {0, 0}},
-                           {{(float)ww, (float)wh}, {22, 22, 60, 255}, {0, 0}}, {{0, (float)wh}, {36, 36, 92, 255}, {0, 0}}};
+        const ui::Pal& P = ui::pal();
+        auto cl = [](ImU32 c, float k, Uint8 a = 255) { SDL_Color o; o.r = (Uint8)std::min(255.f, (c & 0xFF) * k); o.g = (Uint8)std::min(255.f, ((c >> 8) & 0xFF) * k); o.b = (Uint8)std::min(255.f, ((c >> 16) & 0xFF) * k); o.a = a; return o; };
+        SDL_Color c0, c1, c2, c3;
+        if (ui::theme_gb) { c0 = cl(P.shell, 1.04f); c1 = cl(P.shell, 1.0f); c2 = cl(P.shell, 0.9f); c3 = cl(P.shell, 0.95f); }
+        else { c0 = cl(P.shell, 0.42f); c1 = cl(P.shell, 0.28f); c2 = cl(P.shell, 0.10f); c3 = cl(P.shell, 0.18f); }
+        SDL_Vertex v[4] = {{{0, 0}, c0, {0, 0}}, {{(float)ww, 0}, c1, {0, 0}}, {{(float)ww, (float)wh}, c2, {0, 0}}, {{0, (float)wh}, c3, {0, 0}}};
         const int idx[6] = {0, 1, 2, 0, 2, 3};
         SDL_RenderGeometry(ren, nullptr, v, 4, idx, 6);
-        SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
-        SDL_SetRenderDrawColor(ren, 0, 0, 20, 34);
-        for (int x = 0; x < ww; x += 4) SDL_RenderDrawLine(ren, x, 0, x, wh);
-        for (int y = 0; y < wh; y += 4) SDL_RenderDrawLine(ren, 0, y, ww, y);
-    } else if (ui::theme_gbc) {
-        // translucent purple backdrop: lighter at the top-left corner, darker towards the bottom-right
-        int ww = 0, wh = 0; SDL_GetRendererOutputSize(ren, &ww, &wh);
-        SDL_Vertex v[4] = {{{0, 0}, {92, 62, 176, 255}, {0, 0}}, {{(float)ww, 0}, {58, 38, 122, 255}, {0, 0}},
-                           {{(float)ww, (float)wh}, {22, 14, 50, 255}, {0, 0}}, {{0, (float)wh}, {44, 28, 96, 255}, {0, 0}}};
-        const int idx[6] = {0, 1, 2, 0, 2, 3};
-        SDL_RenderGeometry(ren, nullptr, v, 4, idx, 6);
+        if (ui::theme_gb) {   // speaker-grille dots in the bottom-right corner
+            SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(ren, 0, 0, 0, 22);
+            for (int y = wh - 160; y < wh - 30; y += 14) for (int x = ww - 190; x < ww - 30; x += 14) { SDL_Rect d = {x, y, 5, 5}; SDL_RenderFillRect(ren, &d); }
+        }
     }
     if (player && screen == SC_PLAY) player->render(ren, area);
     ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(), ren);
@@ -1934,7 +2440,12 @@ int main(int argc_, char** argv_) {
         return 1;
     }
     SDL_EventState(SDL_DROPFILE, SDL_ENABLE);
-    app.win = SDL_CreateWindow("NativeBoy Studio", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1360, 860, SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+    // the window comes back with the size, place and state it had (like a native program)
+    const int wx = app.prefs.geti("janela_x", SDL_WINDOWPOS_CENTERED), wy = app.prefs.geti("janela_y", SDL_WINDOWPOS_CENTERED);
+    const int ww0 = std::max(1100, app.prefs.geti("janela_w", 1360)), wh0 = std::max(700, app.prefs.geti("janela_h", 860));
+    app.win = SDL_CreateWindow("NativeBoy Studio", wx, wy, ww0, wh0, SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_HIDDEN);
+    if (app.win && app.prefs.getb("janela_max", false)) SDL_MaximizeWindow(app.win);
+    if (app.win) SDL_ShowWindow(app.win);
     if (!app.win) { plat::message_box("NativeBoy Studio", std::string("Não foi possível criar a janela:\n") + SDL_GetError(), true); return 1; }
     SDL_SetWindowMinimumSize(app.win, 1100, 700);
     app.ren = SDL_CreateRenderer(app.win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
@@ -1945,9 +2456,18 @@ int main(int argc_, char** argv_) {
     std::string ini = plat::join(app.user_dir, "imgui.ini");
     static std::string ini_keep = ini;
     ImGui::GetIO().IniFilename = ini_keep.c_str();
-    ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
-    ui::apply_style(false, app.prefs.get("tema", "retro").c_str());
-    ui::load_fonts(app.app_dir, 18.0f);
+    ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad | ImGuiConfigFlags_DockingEnable;
+    ImGui::GetIO().ConfigWindowsMoveFromTitleBarOnly = true;
+    ImGui::GetIO().ConfigDockingWithShift = false;
+    // theme: the old "retro" / "classico" / "gbc" became the GB Color one (grape shell)
+    {
+        std::string t = app.prefs.get("tema", "gbc");
+        if (t != "gb") t = "gbc";
+        app.ui_scale = std::max(0.8f, std::min(1.6f, app.prefs.geti("tamanho_interface", 100) / 100.f));
+        ui::load_fonts(app.app_dir, 18.0f);
+        ImGui::GetStyle().FontScaleMain = app.ui_scale;
+        app.set_theme(t, app.prefs.get("cor_carcaca", "uva"));
+    }
     ImGui_ImplSDL2_InitForSDLRenderer(app.win, app.ren);
     ImGui_ImplSDLRenderer2_Init(app.ren);
 
@@ -1981,6 +2501,16 @@ int main(int argc_, char** argv_) {
     }
 
     while (!app.quit) app.frame();
+    {   // remember the window
+        const Uint32 fl = SDL_GetWindowFlags(app.win);
+        app.prefs.set("janela_max", (fl & SDL_WINDOW_MAXIMIZED) ? "1" : "0");
+        if (!(fl & (SDL_WINDOW_MAXIMIZED | SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_MINIMIZED))) {
+            int x, y, w, h; SDL_GetWindowPosition(app.win, &x, &y); SDL_GetWindowSize(app.win, &w, &h);
+            app.prefs.set("janela_x", std::to_string(x)); app.prefs.set("janela_y", std::to_string(y));
+            app.prefs.set("janela_w", std::to_string(w)); app.prefs.set("janela_h", std::to_string(h));
+        }
+        app.prefs.save();
+    }
 
     app.job.cancel = true;
     if (app.job.th.joinable()) app.job.th.join();

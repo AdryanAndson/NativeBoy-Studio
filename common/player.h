@@ -261,6 +261,10 @@ struct GamePlayer {
     bool load_state(int slot);
     void screenshot();
     void apply_settings();               // palette, color, volume, hd...
+    // look of the menus: "tema_menu" = auto (GB game: grey GB theme; GBC game: GB Color) / gb / gbc,
+    // "cor_carcaca" = shell colour of the GB Color theme. Not in the Studio (it has its own theme).
+    void apply_menu_theme();
+    bool theme_changed = false;          // the window's title bar should follow (runtime main)
     void scan_mods();
     void load_mods_and_rom(std::vector<gb::u8>& rom);
     void write_diagnostics();

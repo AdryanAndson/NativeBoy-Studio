@@ -693,8 +693,12 @@ bool make_game_shortcuts(const std::string& game_dir, bool desktop, bool start_m
 namespace {
 // ---- library drawing helpers
 ImU32 lib_col(int r, int g, int b, int a = 255) { return IM_COL32(r, g, b, a); }
-ImU32 lib_panel() { return ui::theme_retro ? lib_col(46, 46, 112, 240) : ui::theme_gbc ? lib_col(52, 38, 96, 235) : lib_col(32, 35, 42, 255); }
-ImU32 lib_dark() { return ui::theme_retro ? lib_col(22, 22, 58) : ui::theme_gbc ? lib_col(28, 20, 54) : lib_col(20, 22, 28); }
+// GB: the slate of the screen bezel; GBC: the shell colour, darkened (both keep light text readable)
+ImU32 lib_scale(ImU32 c, float k, int a = 255) {
+    return IM_COL32((int)((c & 0xFF) * k), (int)(((c >> 8) & 0xFF) * k), (int)(((c >> 16) & 0xFF) * k), a);
+}
+ImU32 lib_panel() { return ui::theme_gb ? lib_col(74, 76, 92, 250) : lib_scale(ui::pal().shell, 0.36f, 240); }
+ImU32 lib_dark() { return ui::theme_gb ? lib_col(44, 46, 58) : lib_scale(ui::pal().shell, 0.18f); }
 std::string play_time_text(double secs) {
     int s = (int)secs;
     if (s < 60) return "Ainda não jogado";
@@ -787,7 +791,7 @@ void draw_library(const std::string& root, const StudioMsg& msg) {
     };
 
     if (games.empty()) {
-        ui::push_size(1.9f); ImGui::TextUnformatted("Biblioteca"); ui::pop_size();
+        ui::title("BIBLIOTECA", 1.6f);
         ImGui::Spacing();
         ImGui::TextWrapped("Nenhum jogo convertido ainda. Abra uma ROM, use \"Converter para PC\" e o jogo aparece aqui com capa, pronto para jogar.");
         if (ImGui::Button("Abrir pasta Meus Jogos")) { plat::make_dirs(root); plat::open_in_explorer(root); }

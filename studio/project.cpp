@@ -321,9 +321,9 @@ bool Project::step_analyze(BuildLog& log, std::string& err) {
         log.line("Tabelas de saltos encontradas: " + std::to_string(an.jump_tables.size()) + " (" + std::to_string(ne) + " destinos de código a mais).");
     }
     if (!nb::write_disassembly(an, path("desmontagem"), err)) return false;
-    if (log.line) log.line("Desmontagem RGBDS gravada em desmontagem\\ (remonta a ROM idêntica).");
+    if (log.line) log.line("Desmontagem RGBDS gravada em desmontagem/ (remonta a ROM idêntica).");
     if (!nb::write_pseudo_c(an, path("desmontagem/pseudocodigo.c"), err)) return false;
-    if (log.line) log.line("Pseudocódigo C legível gravado em desmontagem\\pseudocodigo.c.");
+    if (log.line) log.line("Pseudocódigo C legível gravado em desmontagem/pseudocodigo.c.");
     if (log.progress) log.progress(0.7f);
     // function list
     std::string csv = "nome;banco;endereco;instrucoes;executada_na_descoberta;rotina_de_som\n";
@@ -350,7 +350,7 @@ bool Project::step_analyze(BuildLog& log, std::string& err) {
         char nm[64]; snprintf(nm, sizeof nm, "graficos/rom_banco_%02X.png", b);
         save_png(path(nm), img.data(), w, h);
     }
-    if (log.line) log.line("Folhas de tiles da ROM gravadas em graficos\\ (áreas de código aparecem avermelhadas).");
+    if (log.line) log.line("Folhas de tiles da ROM gravadas em graficos/ (áreas de código aparecem avermelhadas).");
     Report r = make_report();
     std::string txt = "RELATÓRIO DE COMPATIBILIDADE - " + name + "\r\n" + r.title + "\r\n" + r.summary + "\r\n\r\n";
     for (auto& it : r.items) txt += std::string(it.level == 0 ? "[OK] " : it.level == 1 ? "[AVISO] " : it.level == 2 ? "[PROBLEMA] " : "[INFO] ") + it.text + "\r\n";
@@ -495,7 +495,8 @@ bool Project::step_build(const Toolchain& tc, BuildLog& log, std::string& err) {
     if (!tc.sdl_dll().empty()) plat::copy_file(tc.sdl_dll(), path(B + "/" + SDLN));
     plat::set_executable(exe_out);
     plat::make_dirs(path(B + "/assets/fonts"));
-    plat::copy_file(tc.font_file(), path(B + "/assets/fonts/DejaVuSans.ttf"));
+    for (auto& f : plat::list_dir(plat::parent(tc.font_file()), false))   // text font + the pixel fonts of the menus
+        if (f.size() > 4 && f.substr(f.size() - 4) == ".ttf") plat::copy_file(plat::join(plat::parent(tc.font_file()), f), path(B + "/assets/fonts/" + f));
     plat::remove_file(path(B + "/.compilando"));
     plat::write_text(path(B + "/compilacao.log"), "OK " + plat::now_stamp() + "\n");
     if (log.line) log.line("Compilação concluída: " + plat::join(B, exe_name + SUF));
@@ -599,7 +600,10 @@ bool Project::step_export(const std::string& games_root, const Toolchain& tc, Bu
     }
     }
 #endif
-    plat::copy_file(tc.font_file(), plat::join(out_dir, "assets/fonts/DejaVuSans.ttf"));
+    for (auto& f : plat::list_dir(plat::parent(tc.font_file()), false))
+        if (f.size() > 4 && f.substr(f.size() - 4) == ".ttf") plat::copy_file(plat::join(plat::parent(tc.font_file()), f), plat::join(out_dir, "assets/fonts/" + f));
+    for (auto& f : plat::list_dir(plat::join(tc.app_dir, "licencas"), false))      // (the fonts' licences go with the game)
+        if (f.rfind("OFL-", 0) == 0) { plat::make_dirs(plat::join(out_dir, "licencas")); plat::copy_file(plat::join(plat::join(tc.app_dir, "licencas"), f), plat::join(out_dir, "licencas/" + f)); }
     for (auto& pk : plat::list_dir(path("hd"), true)) {     // the tiles and pack.ini (not the sheet nor the original models)
         const std::string src = path("hd/" + pk), dst = plat::join(out_dir, "assets/hd/" + pk);
         plat::make_dirs(dst);

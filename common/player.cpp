@@ -172,6 +172,14 @@ void GamePlayer::apply_mutes() {
         m.apu->set_mute(i, (!fid && cfg.getb("mudo" + std::to_string(i + 1), false)) || (music_active && (music.mute_mask >> i & 1)));
 }
 
+void GamePlayer::apply_menu_theme() {
+    if (in_studio) return;
+    std::string t = cfg.get("tema_menu", "auto");
+    if (t != "gb" && t != "gbc") t = m.cart.info.cgb_supported ? "gbc" : "gb";
+    ui::apply_theme(t, cfg.get("cor_carcaca", "uva"));
+    theme_changed = true;
+}
+
 bool GamePlayer::start(const std::vector<u8>& rom, const std::string& bd, const std::string& name, NativeResolver* nat, std::string& err) {
     base_dir = bd; game_name = name; native = nat; emulation = nat == nullptr;
     game_id.clear();
@@ -1182,7 +1190,11 @@ void GamePlayer::draw_menu(const SDL_Rect& area) {
     if (want_tab >= 0 && want_tab < 10) menu_tab = want_tab;
     ImGui::SetNextWindowPos(ImVec2((float)area.x, (float)area.y), ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2((float)area.w, (float)area.h), ImGuiCond_Always);
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.06f, 0.04f, 0.13f, 0.86f));
+    {   // the game dimmed behind the menu: the shell of the theme, slightly see-through
+        ImVec4 bg = ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
+        bg.w = ui::theme_gb ? 0.95f : 0.90f;
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, bg);
+    }
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
     // menu size: the font size itself, so the inner panels (sections, buttons) grow too
@@ -1191,10 +1203,9 @@ void GamePlayer::draw_menu(const SDL_Rect& area) {
     ImGui::PopStyleVar(2);
     ImGui::PopStyleColor();
     if (ImGui::IsWindowAppearing()) ImGui::SetWindowFocus();
-    {   // colour stripe along the top, like the Studio
+    {   // the theme stripe along the top, like the Studio (GB: magenta and navy lines)
         ImDrawList* dl = ImGui::GetWindowDrawList();
-        const float sw = area.w / 5.f;
-        for (int i = 0; i < 5; i++) dl->AddRectFilled(ImVec2(area.x + i * sw, (float)area.y), ImVec2(area.x + (i + 1) * sw, area.y + 4.f), ui::accent(i));
+        ui::stripe(dl, (float)area.x, (float)(area.x + area.w), (float)area.y + (ui::theme_gb ? 4.f : 0.f), ui::theme_gb ? 3.f : 4.f);
     }
     const float pw = std::min((float)area.w - 24, 1060.f * uis);
     ImGui::SetCursorPos(ImVec2((area.w - pw) / 2, 14));
@@ -1203,9 +1214,15 @@ void GamePlayer::draw_menu(const SDL_Rect& area) {
     {
         const char* back = narrow ? "Voltar" : "Voltar ao jogo";
         const float bwid = ImGui::CalcTextSize(back).x + 34;
-        ImGui::PushFont(nullptr, (narrow ? 22.f : 30.f) * uis);
+        // the name in pixel letters (8-pixel grid), with the power light before it
+        ImGui::PushFont(ui::font_pixel, std::max(8.f, std::round((narrow ? 16.f : 24.f) * uis / 8.f) * 8.f));
         std::string nm = game_name;
-        while (narrow && nm.size() > 4 && ImGui::CalcTextSize(nm.c_str()).x > pw - bwid - 20) nm = nm.substr(0, nm.size() - 4) + "...";
+        while (nm.size() > 4 && ImGui::CalcTextSize(nm.c_str()).x > pw - bwid - 40) nm = nm.substr(0, nm.size() - 4) + "...";
+        const ImVec2 lp = ImGui::GetCursorScreenPos();
+        const float lh = ImGui::GetTextLineHeight();
+        ui::led(ImGui::GetWindowDrawList(), ImVec2(lp.x + 5, lp.y + lh / 2), 4.f * uis, true);
+        ImGui::SetCursorScreenPos(ImVec2(lp.x + 18 * uis, lp.y));
+        ImGui::GetWindowDrawList()->AddText(ImVec2(lp.x + 18 * uis + 2, lp.y + 2), ui::pal().light ? IM_COL32(255, 255, 255, 150) : IM_COL32(0, 0, 0, 150), nm.c_str());
         ImGui::TextUnformatted(nm.c_str());
         ImGui::PopFont();
         ImGui::SameLine();
@@ -1659,6 +1676,31 @@ void GamePlayer::draw_menu(const SDL_Rect& area) {
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Desloca as cores que se confundem para tons que a pessoa distingue melhor.\nFunciona em jogos coloridos (GBC/SGB) e nas paletas de cor.");
             ImGui::TextDisabled("Para jogos de Game Boy clássico, as paletas \"Acessível p/ daltonismo\" e \"Alto contraste\" (aba Vídeo) também ajudam.");
             ImGui::EndDisabled();
+            if (!in_studio) {
+                // look of the menus: the grey handheld or the colour one (and its shell colour)
+                static const char* tids[] = {"auto", "gb", "gbc"};
+                static const char* tnames[] = {"Automático (pelo tipo do jogo)", "GB clássico (cinza e tela verde)", "GB Color (carcaça colorida)"};
+                int ti = 0; for (int k = 0; k < 3; k++) if (cfg.get("tema_menu", "auto") == tids[k]) ti = k;
+                ImGui::SetNextItemWidth(std::min(320.f * uis, ImGui::GetContentRegionAvail().x * 0.7f));
+                if (ImGui::Combo("Aparência dos menus", &ti, tnames, 3)) { cfg.set("tema_menu", tids[ti]); cfg.save(); apply_menu_theme(); }
+                const bool colour = ui::theme_gbc;
+                if (colour) {
+                    int ns = 0; const ui::Shell* sh = ui::shells(&ns);
+                    ImGui::TextDisabled("Cor da carcaça:");
+                    for (int k = 0; k < ns; k++) {
+                        ImGui::SameLine();
+                        ImGui::PushID(k);
+                        const ImVec2 cp = ImGui::GetCursorScreenPos();
+                        const float r = ImGui::GetFrameHeight() * 0.42f;
+                        if (ImGui::InvisibleButton("cc", ImVec2(r * 2 + 4, r * 2 + 4))) { cfg.set("cor_carcaca", sh[k].id); cfg.save(); apply_menu_theme(); }
+                        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", sh[k].name);
+                        ImDrawList* dl2 = ImGui::GetWindowDrawList();
+                        dl2->AddCircleFilled(ImVec2(cp.x + r + 2, cp.y + r + 2), r, sh[k].color);
+                        if (cfg.get("cor_carcaca", "uva") == sh[k].id) dl2->AddCircle(ImVec2(cp.x + r + 2, cp.y + r + 2), r + 2, ui::accent(3), 0, 2.5f);
+                        ImGui::PopID();
+                    }
+                }
+            }
             int ui = cfg.geti("escala_interface", 100);
             ImGui::SetNextItemWidth(std::min(220.f * uis, ImGui::GetContentRegionAvail().x * 0.55f));
             if (ImGui::SliderInt("Tamanho do menu", &ui, 100, NB_UI_MAX, "%d%%")) cfg.seti("escala_interface", ui);

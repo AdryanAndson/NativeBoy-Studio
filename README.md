@@ -1,4 +1,4 @@
-# NativeBoy Studio 1.17.0
+# NativeBoy Studio 1.18.0
 
 Ferramenta de desktop para **Windows 10/11 x64** e **Linux x64 (Ubuntu/Lubuntu 24.04 ou mais novo)** que analisa ROMs de Game Boy / Game Boy Color, gera projetos editáveis e **recompila estaticamente** o código SM83 para C++, produzindo executáveis nativos (Windows e Linux) que abrem com dois cliques e não precisam da ROM.
 
@@ -46,6 +46,30 @@ Caminhos do jogo que a verificação não alcançou continuam protegidos: se for
 NomeDoJogo.exe   SDL2.dll   LEIA-ME.txt
 assets\  (fontes, mods\, hd\)    config\  (settings.ini, cheats.txt)    saves\
 ```
+
+Novidades da versão 1.18 (visual clássico, painéis e mais código nativo):
+- Dois temas novos, inspirados nos portáteis clássicos, no Studio e nos jogos convertidos:
+  - GB clássico: carcaça cinza, painéis com os quatro verdes da tela, letras azul-marinho e detalhes em magenta.
+  - GB Color: corpo escuro na cor da carcaça escolhida (uva, morango, azul-petróleo, kiwi, dente-de-leão ou "atômico", transparente), com as cinco cores de destaque.
+  - Títulos em fonte pixelada (Press Start 2P e Pixelify Sans, licença SIL OFL, incluídas).
+  - Troca em Exibir > Tema, ou em Ferramentas > Geral (com o tamanho da interface).
+- Janela do Studio no modelo de programa nativo:
+  - Menus no topo (Arquivo, Jogo, Exibir, Ferramentas, Ajuda), com atalhos: Ctrl+O abrir ROM, F5 jogar, F6 descompilar, F7 converter, F8 modificar, Ctrl+L biblioteca, F11 tela cheia, F1 lista de atalhos.
+  - Painéis encaixáveis: "Projeto" (o cartucho, as etapas, a natividade e as ações), "Registro de atividades" e a área de trabalho. Arraste as abas para juntar, separar ou mudar de lado; Exibir > Restaurar a disposição dos painéis volta ao padrão.
+  - Barra de status com o projeto, a etapa, a porcentagem nativa e o compilador.
+  - A janela volta com o tamanho, a posição e o estado (maximizada) que tinha. No Windows 11 a barra de título segue a cor do tema.
+  - O jogo emulado roda dentro da área de trabalho, com o depurador em painel próprio.
+- Nos jogos convertidos:
+  - O tema segue o tipo do jogo (jogo de GB: tema GB; jogo de GB Color: tema GB Color). Dá para trocar em Opções > Acessibilidade > Aparência dos menus, junto com a cor da carcaça.
+  - Tela inicial em estilo de cartucho: nome do jogo em letras pixeladas e menu numa telinha, com a setinha piscando na opção escolhida.
+- Mais código nativo: o conversor agora segue as chamadas indiretas que os jogos usam para chamar código em outros bancos, sem precisar jogar até lá:
+  - "ld hl, Função / call CallHL" (rotina que é só um "jp hl");
+  - "ld a, BANCO / ld hl, Função / call FarCall" (troca o banco e chama hl), inclusive com o banco em outro registrador e por "rst";
+  - "ld de, Função / push de / ret".
+  - trampolins mais elaborados: o banco escolhido por uma sub-rotina (mesmo terminando em "reti"), HL guardado em DE ou na pilha antes do salto;
+  - endereços de rotinas guardados para depois ("ld bc, Rotina / call RegistraRotina"), quando ficam logo depois do fim de outra rotina;
+  - tabelas de saltos lidas por HL com instruções no meio do caminho.
+  Resultado, só com a análise (sem jogar nenhum quadro): no uCity, um jogo completo de GB Color, o código da ROM que caía na emulação em 1.800 quadros passou de cerca de 10 milhões de instruções para zero. O que o jogo copia para a RAM continua precisando da descoberta (jogar), como antes. A ROM de teste far_test.gb (feita para o NativeBoy) converte 100% nativa sem descoberta; antes, 67 instruções caíam na emulação.
 
 Novidades da versão 1.17 (versão para celular Android):
 - Cada jogo convertido pode virar um aplicativo Android (.apk), para instalar direto no celular (sem Play Store).
@@ -313,4 +337,4 @@ DEPS=/caminho/deps ./build_win.sh   # NativeBoyStudio.exe + dist/ + NativeBoyStu
 - **O que foi testado.** No Windows, o Studio, os jogos exportados e o instalador foram testados via Wine, sem áudio real nem controle físico. Ainda falta testar num Windows 10/11 de verdade e com jogos comerciais. O instalador não tem assinatura digital, então o SmartScreen vai avisar; assinar exige um certificado de assinatura de código em nome do autor.
 - **Atualizações.** Informe o repositório do GitHub (`dono/repositório`) ou a URL de um canal JSON em Ferramentas > Atualizações.
 
-Licença: MIT (veja `installer/LICENCA.txt`). Componentes de terceiros: SDL2 (zlib), Dear ImGui (MIT), stb, w64devkit/GCC, RGBDS (MIT), DejaVu.
+Licença: MIT (veja `installer/LICENCA.txt`). Componentes de terceiros: SDL2 (zlib), Dear ImGui (MIT, ramo docking), stb, w64devkit/GCC, RGBDS (MIT), DejaVu, Press Start 2P e Pixelify Sans (SIL Open Font License 1.1).

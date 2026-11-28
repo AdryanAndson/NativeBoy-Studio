@@ -238,7 +238,9 @@ native_test() {  # rom discovery_frames verify_frames label expect_serial
   res=$(python3 - "$T/st.json" "$exp" <<'PY'
 import json,sys
 d=json.load(open(sys.argv[1])); exp=sys.argv[2]
-ok = d["identical"] and d["fallback_rom_instr"]==0 and d["fallback_ram_instr"]==0 and (exp=="" or exp in d["serial"])
+import os
+ram_ok = d["fallback_ram_instr"]==0 or os.environ.get("NT_ROM_ONLY")   # (code copied to RAM is only found by playing)
+ok = d["identical"] and d["fallback_rom_instr"]==0 and ram_ok and (exp=="" or exp in d["serial"])
 print(("OK" if ok else "FAIL")+"|idêntico ao interpretador em %d quadros; fallback ROM=%d RAM=%d; instr. nativas=%d+%d RAM%s" % (
   d["frames"], d["fallback_rom_instr"], d["fallback_ram_instr"], d["native_instr"], d["native_ram_instr"], ("; serial contém '%s'"%exp) if exp else ""))
 PY
@@ -258,6 +260,8 @@ done
 [ -f "$N/tests/roms/mbc7_test.gb" ] && native_test "$N/tests/roms/mbc7_test.gb" 20 60 "Nativo: MBC7 (mbc7_test.gb)" "AOKEOK"
 [ -f "$N/tests/roms/jt2_test.gb" ] && NT_NOFIX=1 native_test "$N/tests/roms/jt2_test.gb" 0 120 "Nativo: tabela lida por HL (jp hl) sem descoberta (jt2_test.gb)" "ABCDEOK"
 [ -f "$N/tests/roms/jt_test.gb" ] && NT_NOFIX=1 native_test "$N/tests/roms/jt_test.gb" 0 120 "Nativo: tabela de saltos sem descoberta (jt_test.gb, só análise estática)" "ABCDEOK"
+[ -f "$R/ucity.gbc" ] && NT_NOFIX=1 NT_ROM_ONLY=1 native_test "$R/ucity.gbc" 0 1800 "Nativo: uCity só com análise estática (sem jogar): nenhum código da ROM emulado" ""
+[ -f "$N/tests/roms/far_test.gb" ] && NT_NOFIX=1 native_test "$N/tests/roms/far_test.gb" 0 120 "Nativo: chamadas indiretas (CallHL, FarCall, rst, push/ret) sem descoberta (far_test.gb)" "ABCDEOK"
 [ -f "$R/mem_timing.gb" ] && native_test "$R/mem_timing.gb" 600 600 "Nativo: mem_timing.gb (temporização de memória por ciclo)" "Passed"
 [ -f "$R/halt_bug.gb" ] && native_test "$R/halt_bug.gb" 600 600 "Nativo: halt_bug.gb" ""
 [ -f "$R/dmg-acid2.gb" ] && native_test "$R/dmg-acid2.gb" 300 600 "Nativo: dmg-acid2.gb" ""
